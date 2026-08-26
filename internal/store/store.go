@@ -114,6 +114,13 @@ func (s *Store) Ego(root graph.NodeID, depth int) (SubGraph, bool) {
 // Len retourne le nombre de nœuds stockés.
 func (s *Store) Len() int { return len(s.nodes) }
 
+// Edges retourne une copie de toutes les arêtes du graphe.
+func (s *Store) Edges() []graph.Edge {
+	out := make([]graph.Edge, len(s.edges))
+	copy(out, s.edges)
+	return out
+}
+
 // Nodes retourne tous les nœuds, triés par kind puis nom (pour un menu stable).
 func (s *Store) Nodes() []graph.Node {
 	out := make([]graph.Node, 0, len(s.nodes))

@@ -6,168 +6,345 @@
 <title>kubegraph</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
 <style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
-  header { padding: 10px 14px; border-bottom: 1px solid #8883; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  header h1 { font-size: 16px; margin: 0 12px 0 0; }
-  label { font-size: 12px; opacity: .8; }
-  select, input, button { font: inherit; padding: 5px 8px; border: 1px solid #8886; border-radius: 6px; background: transparent; color: inherit; }
-  button { cursor: pointer; }
-  input[type=number] { width: 60px; }
-  #cy { flex: 1; min-height: 0; }
-  #legend { padding: 8px 14px; border-top: 1px solid #8883; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; }
-  .chip { display: inline-flex; align-items: center; gap: 5px; }
-  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
-  #status { font-size: 12px; opacity: .75; margin-left: auto; }
-  .hint { font-size: 12px; opacity: .7; padding: 0 14px 8px; }
+  :root {
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c2230; --border:#2a313c;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --bad:#f85149; --warn:#e3b341;
+    --workload:#58a6ff; --networking:#3fb950; --config:#bc8cff; --security:#f85149; --unknown:#8b949e;
+  }
+  * { box-sizing:border-box; }
+  html,body { height:100%; }
+  body { margin:0; background:var(--bg); color:var(--text);
+    font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    display:flex; flex-direction:column; height:100vh; }
+  header { padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--border);
+    display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  .brand { font-weight:700; font-size:15px; margin-right:4px; }
+  .brand span { color:var(--accent); }
+  label { font-size:12px; color:var(--muted); display:inline-flex; align-items:center; gap:6px; }
+  select,input[type=text],input[type=number],button {
+    font:inherit; padding:6px 9px; border:1px solid var(--border); border-radius:7px;
+    background:var(--panel2); color:var(--text); outline:none; }
+  select:focus,input:focus { border-color:var(--accent); }
+  input[type=number]{ width:56px; }
+  button { cursor:pointer; transition:background .15s,border-color .15s; }
+  button:hover { border-color:var(--accent); }
+  .tabs { display:inline-flex; background:var(--panel2); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .tabs button { border:0; border-radius:0; background:transparent; padding:6px 14px; color:var(--muted); }
+  .tabs button.active { background:var(--accent); color:#06101f; font-weight:600; }
+  #flow-controls, #explorer-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
+  body[data-mode="flow"] #flow-controls { display:flex; }
+  body[data-mode="explore"] #explorer-controls { display:flex; }
+  .switch { font-size:12px; color:var(--muted); }
+  .hint { font-size:12px; color:var(--muted); padding:8px 16px 0; }
+  .stage { flex:1; min-height:0; position:relative; display:flex; }
+  #flow-wrap, #sankey-wrap { flex:1; min-height:0; overflow:auto; display:none; }
+  body[data-mode="flow"] #flow-wrap { display:block; }
+  body[data-mode="overview"] #sankey-wrap { display:block; }
+  #explore-wrap { flex:1; min-height:0; display:none; }
+  body[data-mode="explore"] #explore-wrap { display:flex; }
+  #cy { flex:1; min-height:0; }
+  aside { width:288px; flex:none; background:var(--panel); border-left:1px solid var(--border); padding:16px; overflow-y:auto; }
+  aside .empty { color:var(--muted); font-size:12px; margin-top:8px; }
+  aside h2 { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 10px; }
+  .kv { display:grid; grid-template-columns:84px 1fr; gap:4px 10px; font-size:13px; margin-bottom:14px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; word-break:break-all; }
+  .pill { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; color:#06101f; }
+  aside button.full { width:100%; margin-top:4px; background:var(--accent); color:#06101f; font-weight:600; border-color:transparent; }
+  .zoombar { position:absolute; left:14px; bottom:14px; display:flex; gap:6px; z-index:5; }
+  .zoombar button { width:34px; height:34px; padding:0; font-size:16px; background:var(--panel); }
+  #legend { padding:9px 16px; border-top:1px solid var(--border); display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--muted); align-items:center; }
+  .chip { display:inline-flex; align-items:center; gap:6px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
+  #status { font-size:12px; color:var(--muted); margin-left:auto; }
+  #flow text, #sankey text { pointer-events:none; }
+  svg .bad { stroke:var(--bad); stroke-width:2; }
+  svg .warn { stroke:var(--warn); stroke-width:2; }
 </style>
 </head>
-<body>
+<body data-mode="flow">
   <header>
-    <h1>kubegraph</h1>
-    <label>API <input id="api" value="http://localhost:8080" size="22"></label>
-    <label>nœud de départ <select id="picker"><option value="">— charger l'API —</option></select></label>
-    <label>profondeur <input id="depth" type="number" value="1" min="0" max="6"></label>
-    <button id="load">Charger</button>
-    <button id="reset">Reset</button>
+    <span class="brand">kube<span>graph</span></span>
+    <div class="tabs">
+      <button id="tab-flow" class="active">Flux</button>
+      <button id="tab-overview">Vue d'ensemble</button>
+      <button id="tab-explore">Explorer</button>
+    </div>
+    <label>API <input id="api" type="text" value="http://localhost:8080" size="20"></label>
+    <button id="refresh">Rafraîchir</button>
+    <span id="flow-controls">
+      <label>namespace <select id="ns-picker"></select></label>
+    </span>
+    <span id="explorer-controls">
+      <label>départ <select id="picker"><option value="">—</option></select></label>
+      <label>profondeur <input id="depth" type="number" value="2" min="0" max="6"></label>
+      <button id="load">Charger</button>
+      <button id="reset">Reset</button>
+      <label class="switch"><input type="checkbox" id="showlabels"> noms</label>
+    </span>
     <span id="status"></span>
   </header>
-  <div class="hint">Clique un nœud pour déplier son cercle suivant.</div>
-  <div id="cy"></div>
+  <div class="hint" id="hint"></div>
+
+  <div class="stage">
+    <div id="flow-wrap"><div id="flow"></div></div>
+    <div id="sankey-wrap"><div id="sankey"></div></div>
+    <div id="explore-wrap">
+      <div id="cy"></div>
+      <div class="zoombar">
+        <button id="zin" title="Zoom +">+</button>
+        <button id="zout" title="Zoom −">−</button>
+        <button id="zfit" title="Ajuster">⤢</button>
+      </div>
+      <aside id="panel">
+        <h2>Détail du nœud</h2>
+        <div class="empty" id="panel-empty">Clique un nœud dans le graphe pour voir ses infos et déplier ses relations.</div>
+        <div id="panel-body" style="display:none">
+          <dl class="kv">
+            <dt>Type</dt><dd id="p-kind"></dd><dt>Nom</dt><dd id="p-name"></dd>
+            <dt>Namespace</dt><dd id="p-ns"></dd><dt>Couche</dt><dd><span class="pill" id="p-layer"></span></dd>
+            <dt>Cercle</dt><dd id="p-deg"></dd><dt>Voisins</dt><dd id="p-nb"></dd>
+          </dl>
+          <button class="full" id="p-focus">Recentrer ici</button>
+        </div>
+      </aside>
+    </div>
+  </div>
   <div id="legend"></div>
 
 <script>
-const LAYER_COLORS = {
-  workload:   "#4c78a8",
-  networking: "#59a14f",
-  config:     "#b279a2",
-  security:   "#e15759",
-  unknown:    "#9c9c9c",
+const LAYER = {
+  workload:{color:"#58a6ff",label:"workload"}, networking:{color:"#3fb950",label:"networking"},
+  config:{color:"#bc8cff",label:"config"}, security:{color:"#f85149",label:"security"}, unknown:{color:"#8b949e",label:"unknown"},
 };
-
+const layerColor = l => (LAYER[l]||LAYER.unknown).color;
 const el = id => document.getElementById(id);
-const apiBase = () => el("api").value.replace(/\/+$/, "");
+const apiBase = () => el("api").value.replace(/\/+$/,"");
 const setStatus = t => { el("status").textContent = t; };
+const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+try { const s = localStorage.getItem("kubegraph_api"); if (s) el("api").value = s; } catch (_) {}
+el("api").addEventListener("change", () => { try { localStorage.setItem("kubegraph_api", el("api").value); } catch (_) {} });
 
-// uid = tout ce qui suit le premier "/" de l'id "cluster/uid".
-function uidOf(node) {
-  const id = node.data("id"), cluster = node.data("cluster");
-  return id.slice(cluster.length + 1);
+let gGraph = null, gNodes = null;
+async function fetchJSON(path) { const r = await fetch(apiBase()+path); if (!r.ok) throw new Error(path+" "+r.status); return r.json(); }
+async function ensureGraph() { if (!gGraph) gGraph = await fetchJSON("/graph"); return gGraph; }
+async function ensureNodes() { if (!gNodes) gNodes = await fetchJSON("/nodes"); return gNodes; }
+
+/* =================== FLUX — Sankey de dépendances =================== */
+const COLS = ["Deployment","ReplicaSet","Pod","Service","Ingress"];
+const colOf = k => COLS.indexOf(k);
+
+function fillNsPicker(graph) {
+  const count = {};
+  for (const n of graph.nodes) if (colOf(n.kind) >= 0) { const ns = n.namespace || "—"; count[ns] = (count[ns]||0)+1; }
+  const list = Object.keys(count).sort((a,b)=>count[b]-count[a]);
+  const sel = el("ns-picker"); const cur = sel.value;
+  sel.innerHTML = "";
+  for (const ns of list) { const o = document.createElement("option"); o.value = ns; o.textContent = `${ns} (${count[ns]})`; sel.appendChild(o); }
+  if (cur && list.includes(cur)) sel.value = cur;
+  return list;
 }
 
+function renderFlow(graph, ns) {
+  const host = el("flow");
+  const byId = {}; for (const n of graph.nodes) byId[n.id] = n;
+  const inNs = n => (n.namespace || "—") === ns;
+
+  // Liens de chaîne = arêtes inversées (owner→child, pod→service, service→ingress),
+  // uniquement entre colonnes adjacentes et dans le namespace choisi.
+  const links = [];
+  for (const e of graph.edges) {
+    const s = byId[e.target], t = byId[e.source];      // inversion
+    if (!s || !t || !inNs(s) || !inNs(t)) continue;
+    const cs = colOf(s.kind), ct = colOf(t.kind);
+    if (cs < 0 || ct < 0 || ct !== cs + 1) continue;
+    links.push({ s: e.target, t: e.source });
+  }
+  const out = {}, inc = {};
+  for (const l of links) { (out[l.s] = out[l.s]||[]).push(l.t); (inc[l.t] = inc[l.t]||[]).push(l.s); }
+
+  // Nœuds par colonne (tous les objets du ns dans les 5 types).
+  const col = [[],[],[],[],[]];
+  for (const n of graph.nodes) { if (!inNs(n)) continue; const c = colOf(n.kind); if (c >= 0) col[c].push(n); }
+
+  // Valeur en pods.
+  const pv = {};
+  for (const n of col[2]) pv[n.id] = 1;                                             // Pod
+  for (const n of col[1]) pv[n.id] = (out[n.id]||[]).length;                        // ReplicaSet -> #pods
+  for (const n of col[0]) pv[n.id] = (out[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0); // Deployment
+  for (const n of col[3]) pv[n.id] = (inc[n.id]||[]).length;                        // Service -> #pods
+  for (const n of col[4]) pv[n.id] = (inc[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0); // Ingress
+
+  // On masque les ReplicaSets morts (0 pod = historique de révisions).
+  const dropped = new Set(col[1].filter(n => (pv[n.id]||0) === 0).map(n => n.id));
+  col[1] = col[1].filter(n => !dropped.has(n.id));
+  const flinks = links.filter(l => !dropped.has(l.s) && !dropped.has(l.t));
+
+  if (col.every(c => c.length === 0)) { host.innerHTML = "<p style='color:var(--muted);padding:24px'>Rien à afficher dans ce namespace.</p>"; return; }
+
+  // Ordonnancement par barycentre (réduit les croisements).
+  col[0].sort((a,b)=>a.name.localeCompare(b.name));
+  for (let c = 1; c < 5; c++) {
+    const idx = {}; col[c-1].forEach((n,i)=>idx[n.id]=i);
+    col[c].forEach(n => { const src=(inc[n.id]||[]).filter(id=>idx[id]!==undefined);
+      n._b = src.length ? src.reduce((a,id)=>a+idx[id],0)/src.length : 1e9; });
+    col[c].sort((a,b)=>(a._b-b._b)||a.name.localeCompare(b.name));
+  }
+
+  // Géométrie.
+  const scale = 7, minH = 16, gap = 7, headY = 26;
+  const W = Math.max(host.clientWidth || 1200, 1080);
+  const leftPad = 195, rightPad = 215, nodeW = 12, Mt = 40, Mb = 24;
+  const colX = i => leftPad + ((W - leftPad - rightPad) / 4) * i;
+
+  const H = {}, colTot = [];
+  for (let c = 0; c < 5; c++) { let t = 0; for (const n of col[c]) { const h = Math.max(minH, (pv[n.id]||0)*scale); H[n.id]=h; t += h + gap; } colTot[c] = Math.max(0, t - gap); }
+  const maxTot = Math.max(1, ...colTot);
+  const pos = {};
+  for (let c = 0; c < 5; c++) { let y = Mt + (maxTot - colTot[c]) / 2; for (const n of col[c]) { pos[n.id] = { x: colX(c), y, h: H[n.id], col: c }; y += H[n.id] + gap; } }
+
+  // Bandes des rubans.
+  const outL = {}, inL = {};
+  for (const l of flinks) {
+    const sk = byId[l.s].kind;
+    l.val = sk==="Deployment" ? (pv[l.t]||0) : sk==="Service" ? (pv[l.s]||0) : 1;
+    (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l);
+  }
+  const alloc = (map, key, yKey) => {
+    for (const id in map) { const arr = map[id], p = pos[id];
+      arr.sort((a,b)=>pos[a[key]].y - pos[b[key]].y);
+      const sum = arr.reduce((s,l)=>s+Math.max(1.5,l.val*scale),0);
+      let off = p.y + Math.max(0, (p.h - sum) / 2);
+      for (const l of arr) { const th = Math.max(1.5, l.val*scale); l[yKey+"0"]=off; l[yKey+"1"]=off+th; off+=th; }
+    }
+  };
+  alloc(outL, "t", "sy"); alloc(inL, "s", "ty");
+
+  // SVG.
+  const svgH = Mt + maxTot + Mb;
+  const ribbon = (x0,ya0,yb0,x1,ya1,yb1,color) => { const xm=(x0+x1)/2;
+    return `<path d="M${x0},${ya0} C${xm},${ya0} ${xm},${ya1} ${x1},${ya1} L${x1},${yb1} C${xm},${yb1} ${xm},${yb0} ${x0},${yb0} Z" fill="${color}" fill-opacity="0.3"/>`; };
+  let s = `<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui" font-size="11">`;
+  // en-têtes de colonnes
+  for (let c = 0; c < 5; c++) s += `<text x="${colX(c)+nodeW/2}" y="${headY}" text-anchor="middle" fill="#8b949e" font-weight="600">${COLS[c]}</text>`;
+  // rubans
+  for (const l of flinks) s += ribbon(pos[l.s].x+nodeW, l.sy0, l.sy1, pos[l.t].x, l.ty0, l.ty1, layerColor(byId[l.s].layer));
+  // nœuds + labels
+  for (let c = 0; c < 5; c++) for (const n of col[c]) {
+    const p = pos[n.id], v = pv[n.id]||0;
+    const broken = v === 0 && (n.kind==="Service" || n.kind==="Ingress" || n.kind==="Deployment");
+    const cls = broken ? " class=\"bad\"" : "";
+    s += `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${layerColor(n.layer)}"${cls}><title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}</title></rect>`;
+    const tag = broken ? " ⚠︎0" : "";
+    if (c === 0) s += `<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" fill="#e6edf3">${esc(n.name)}${tag}</text>`;
+    else if (c === 3 || c === 4) s += `<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" fill="${broken?'#f85149':'#e6edf3'}">${esc(n.name)}${tag}</text>`;
+  }
+  s += `</svg>`;
+  host.innerHTML = s;
+
+  // Résumé ingress.
+  const ing = col[4]; const ok = ing.filter(n=>(pv[n.id]||0)>0).length;
+  const dep0 = col[0].filter(n=>(pv[n.id]||0)===0).length;
+  const svc0 = col[3].filter(n=>(pv[n.id]||0)===0).length;
+  let msg = `${ns} · ${col[0].length} deployments, ${col[2].length} pods`;
+  if (ing.length) msg += ` · ingress ${ok}/${ing.length} fonctionnels`;
+  if (svc0) msg += ` · ${svc0} service(s) sans pod`;
+  if (dep0) msg += ` · ${dep0} deployment(s) à 0`;
+  setStatus(msg);
+}
+
+/* =================== VUE D'ENSEMBLE — taxonomie namespace =================== */
+function renderOverview(nodes) {
+  const host = el("sankey");
+  if (!nodes.length) { host.innerHTML = ""; return; }
+  const cluster = (nodes[0]&&nodes[0].cluster)||"cluster";
+  const nsCount = {}, nsKind = {};
+  for (const n of nodes) { const ns=n.namespace||"cluster-scoped"; nsCount[ns]=(nsCount[ns]||0)+1; (nsKind[ns]=nsKind[ns]||{})[n.kind]=(nsKind[ns][n.kind]||0)+1; }
+  const total = nodes.length;
+  const nsList = Object.keys(nsCount).sort((a,b)=>nsCount[b]-nsCount[a]);
+  const palette = ["#58a6ff","#3fb950","#bc8cff","#f0883e","#39c5cf","#e3b341","#f85149","#db61a2","#7ee787","#a5d6ff","#ffa657","#d2a8ff","#56d364","#e2c08d"];
+  const nsColor = {}; nsList.forEach((ns,i)=>nsColor[ns]=palette[i%palette.length]);
+  const perObj=3.2, minK=15, gapK=2, gapNs=12, nodeW=13;
+  const W = Math.max(host.clientWidth||1000, 700), xC=110, xN=300, xK=W-210, Mt=18;
+  const kindPos={}, nsPos={}; let y=Mt;
+  for (const ns of nsList) { kindPos[ns]={}; const ks=Object.keys(nsKind[ns]).sort((a,b)=>nsKind[ns][b]-nsKind[ns][a]); const sy=y;
+    ks.forEach((k,i)=>{ const h=Math.max(minK,nsKind[ns][k]*perObj); kindPos[ns][k]={y,h}; y+=h+(i<ks.length-1?gapK:0); }); nsPos[ns]={y:sy,h:y-sy}; y+=gapNs; }
+  const totalH=y-gapNs, H=totalH+Mt+18, clY=Mt, clH=totalH;
+  const ribbon=(x0,ya0,yb0,x1,ya1,yb1,color)=>{const xm=(x0+x1)/2;return `<path d="M${x0},${ya0} C${xm},${ya0} ${xm},${ya1} ${x1},${ya1} L${x1},${yb1} C${xm},${yb1} ${xm},${yb0} ${x0},${yb0} Z" fill="${color}" fill-opacity="0.25"/>`;};
+  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="system-ui" font-size="11">`;
+  for (const ns of nsList){const p=nsPos[ns]; s+=ribbon(xC+nodeW,p.y,p.y+p.h,xN,p.y,p.y+p.h,nsColor[ns]);}
+  for (const ns of nsList) for (const k of Object.keys(kindPos[ns])){const kp=kindPos[ns][k]; s+=ribbon(xN+nodeW,kp.y,kp.y+kp.h,xK,kp.y,kp.y+kp.h,nsColor[ns]);}
+  s+=`<rect x="${xC}" y="${clY}" width="${nodeW}" height="${clH}" rx="3" fill="#6e7681"/><text x="${xC-8}" y="${clY+12}" text-anchor="end" fill="#e6edf3" font-weight="700">Cluster</text><text x="${xC-8}" y="${clY+27}" text-anchor="end" fill="#8b949e">${esc(cluster)} · ${total}</text>`;
+  for (const ns of nsList){const p=nsPos[ns]; s+=`<rect x="${xN}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${nsColor[ns]}"/><text x="${xN-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" fill="#e6edf3">${esc(ns)} · ${nsCount[ns]}</text>`;}
+  for (const ns of nsList) for (const k of Object.keys(kindPos[ns])){const kp=kindPos[ns][k]; s+=`<rect x="${xK}" y="${kp.y}" width="${nodeW}" height="${kp.h}" rx="3" fill="${nsColor[ns]}"/><text x="${xK+nodeW+6}" y="${kp.y+kp.h/2}" dominant-baseline="middle" fill="#c9d1d9">${esc(k)} · ${nsKind[ns][k]}</text>`;}
+  s+=`</svg>`; host.innerHTML=s;
+  setStatus(`${total} objets · ${nsList.length} namespaces`);
+}
+
+/* =================== EXPLORER — ego-graph =================== */
 const cy = cytoscape({
-  container: el("cy"),
+  container: el("cy"), minZoom:0.2, maxZoom:3, wheelSensitivity:0.25,
   style: [
-    { selector: "node", style: {
-      "background-color": e => LAYER_COLORS[e.data("layer")] || LAYER_COLORS.unknown,
-      "label": e => `${e.data("kind")}/${e.data("name")}`,
-      "font-size": 10, "color": "#ccc", "text-outline-width": 2, "text-outline-color": "#000a",
-      "width": e => e.data("degree") === 0 ? 34 : 22,
-      "height": e => e.data("degree") === 0 ? 34 : 22,
-      "border-width": e => e.data("degree") === 0 ? 3 : 0,
-      "border-color": "#fff",
-    }},
-    { selector: "edge", style: {
-      "width": 1.5, "line-color": "#8888", "target-arrow-color": "#8888",
-      "target-arrow-shape": "triangle", "curve-style": "bezier",
-      "label": "data(type)", "font-size": 8, "color": "#999", "text-rotation": "autorotate",
-    }},
+    { selector:"node", style:{ "background-color":e=>layerColor(e.data("layer")),
+      "width":e=>e.data("degree")===0?30:20, "height":e=>e.data("degree")===0?30:20, "border-width":0,
+      "label":e=>`${e.data("kind")}/${e.data("name")}`, "font-size":10, "color":"#e6edf3",
+      "text-valign":"bottom", "text-margin-y":5, "text-opacity":0,
+      "text-background-color":"#161b22", "text-background-opacity":0.92, "text-background-shape":"roundrectangle", "text-background-padding":3, "min-zoomed-font-size":7 }},
+    { selector:"node.seed", style:{ "border-width":3, "border-color":"#58a6ff", "text-opacity":1, "font-weight":"bold" }},
+    { selector:"node.lbl", style:{ "text-opacity":1 }},
+    { selector:"node.hl", style:{ "text-opacity":1, "z-index":20, "border-width":2, "border-color":"#fff" }},
+    { selector:"edge", style:{ "width":1.4, "line-color":"#3a4351", "curve-style":"bezier",
+      "target-arrow-shape":"triangle", "target-arrow-color":"#3a4351", "arrow-scale":0.8,
+      "label":"", "font-size":8, "color":"#8b949e", "text-rotation":"autorotate",
+      "text-background-color":"#0e1116", "text-background-opacity":1, "text-background-padding":2 }},
+    { selector:"edge.hl", style:{ "line-color":"#58a6ff", "target-arrow-color":"#58a6ff", "width":2, "label":"data(type)", "z-index":19 }},
+    { selector:".faded", style:{ "opacity":0.12, "text-opacity":0 }},
   ],
 });
-
+window.addEventListener("resize", () => cy.resize());
 let maxDegree = 0;
+const uidOf = n => { const id=n.data("id"); return id.slice(n.data("cluster").length+1); };
+function relayout(){ cy.layout({ name:"concentric", concentric:n=>maxDegree-(n.data("degree")??maxDegree)+1, levelWidth:()=>1, minNodeSpacing:55, animate:true, animationDuration:350, avoidOverlap:true }).run(); }
+function applyLabelToggle(){ cy.nodes().toggleClass("lbl", el("showlabels").checked); }
+function merge(ego){ cy.batch(()=>{ for(const n of ego.nodes){ const ex=cy.getElementById(n.id); if(ex.nonempty()) ex.data("degree",Math.min(ex.data("degree"),n.degree)); else cy.add({group:"nodes",data:{...n}}); maxDegree=Math.max(maxDegree,n.degree);} for(const e of ego.edges){ const id=`${e.source}__${e.type}__${e.target}`; if(cy.getElementById(id).empty()) cy.add({group:"edges",data:{id,source:e.source,target:e.target,type:e.type}});}});
+  cy.getElementById(ego.root).addClass("seed"); applyLabelToggle(); relayout(); }
+async function fetchEgo(cluster,uid,depth){ const r=await fetch(`${apiBase()}/ego?cluster=${encodeURIComponent(cluster)}&uid=${encodeURIComponent(uid)}&depth=${depth}`); if(!r.ok) throw new Error(`${r.status} ${(await r.json()).error||""}`); return r.json(); }
+function fillPicker(nodes){ const p=el("picker"); p.innerHTML=""; nodes.slice().sort((a,b)=>(a.kind+a.name).localeCompare(b.kind+b.name)).forEach(n=>{ const o=document.createElement("option"); o.value=JSON.stringify({cluster:n.cluster,id:n.id}); o.textContent=`${n.kind}/${n.name}${n.namespace?" · "+n.namespace:""}`; p.appendChild(o); }); }
+cy.on("mouseover","node",e=>{ const nb=e.target.closedNeighborhood(); cy.elements().addClass("faded"); nb.removeClass("faded"); nb.nodes().addClass("hl"); nb.edges().addClass("hl"); });
+cy.on("mouseout","node",()=>cy.elements().removeClass("faded hl"));
+cy.on("tap","node",async e=>{ const node=e.target; openPanel(node); try{ setStatus(`expansion de ${node.data("name")}…`); merge(await fetchEgo(node.data("cluster"),uidOf(node),1)); openPanel(node); setStatus(`${cy.nodes().length} nœuds affichés`);}catch(err){setStatus("erreur : "+err.message);} });
+cy.on("tap",e=>{ if(e.target===cy) closePanel(); });
+function openPanel(node){ el("panel-empty").style.display="none"; el("panel-body").style.display="block";
+  el("p-kind").textContent=node.data("kind"); el("p-name").textContent=node.data("name"); el("p-ns").textContent=node.data("namespace")||"—";
+  const lp=el("p-layer"); lp.textContent=node.data("layer"); lp.style.background=layerColor(node.data("layer"));
+  el("p-deg").textContent=node.data("degree"); el("p-nb").textContent=node.degree(false);
+  el("p-focus").onclick=async()=>{ try{ cy.elements().remove(); maxDegree=0; merge(await fetchEgo(node.data("cluster"),uidOf(node),parseInt(el("depth").value,10))); cy.fit(cy.elements(),40);}catch(err){setStatus("erreur : "+err.message);} }; }
+function closePanel(){ el("panel-body").style.display="none"; el("panel-empty").style.display="block"; }
+el("load").onclick=async()=>{ if(!el("picker").value) return; try{ const {cluster,id}=JSON.parse(el("picker").value); cy.elements().remove(); maxDegree=0; closePanel(); merge(await fetchEgo(cluster,id.slice(cluster.length+1),parseInt(el("depth").value,10))); cy.fit(cy.elements(),40); setStatus(`${cy.nodes().length} nœuds affichés`);}catch(e){setStatus("erreur : "+e.message);} };
+el("reset").onclick=()=>{ cy.elements().remove(); maxDegree=0; closePanel(); setStatus("réinitialisé"); };
+el("showlabels").onchange=applyLabelToggle;
+el("zin").onclick=()=>cy.zoom({level:cy.zoom()*1.3,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
+el("zout").onclick=()=>cy.zoom({level:cy.zoom()/1.3,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
+el("zfit").onclick=()=>cy.fit(cy.elements(),40);
 
-function relayout() {
-  cy.layout({
-    name: "concentric",
-    concentric: n => maxDegree - (n.data("degree") ?? maxDegree) + 1, // degré 0 au centre
-    levelWidth: () => 1,
-    minNodeSpacing: 40,
-    animate: true, animationDuration: 300,
-  }).run();
-}
+/* =================== Bascule =================== */
+async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow");
+  el("hint").textContent="Flux — ce qui découle de chaque Deployment : Deployment → ReplicaSet → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Un ingress sans flux entrant, un service ou deployment à 0 pod = marqué en rouge.";
+  try { const g=await ensureGraph(); fillNsPicker(g); renderFlow(g, el("ns-picker").value); }
+  catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
+async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
+  el("hint").textContent="Vue d'ensemble — Cluster → Namespaces → Types. La hauteur = le nombre d'objets.";
+  try { renderOverview(await ensureNodes()); } catch(e){ setStatus("API injoignable : "+e.message); } }
+async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore");
+  el("hint").textContent="Explorer — choisis un départ puis Charger. Survole pour isoler les liens, clique pour le détail et déplier le cercle suivant.";
+  try { fillPicker(await ensureNodes()); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
+function setTab(m){ for (const t of ["flow","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
+el("tab-flow").onclick=showFlow; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
+el("ns-picker").onchange=()=>{ if(gGraph) renderFlow(gGraph, el("ns-picker").value); };
+el("refresh").onclick=async()=>{ gGraph=null; gNodes=null;
+  const m=document.body.dataset.mode; if(m==="flow") showFlow(); else if(m==="overview") showOverviewTab(); else showExplore(); };
+el("legend").innerHTML = Object.values(LAYER).map(l=>`<span class="chip"><span class="dot" style="background:${l.color}"></span>${l.label}</span>`).join("") + `<span class="chip" style="margin-left:8px"><span class="dot" style="background:var(--bad)"></span>0 pod / cassé</span>`;
 
-// Fusionne un sous-graphe (réponse /ego) dans le graphe existant.
-function merge(ego) {
-  cy.batch(() => {
-    for (const n of ego.nodes) {
-      const existing = cy.getElementById(n.id);
-      if (existing.nonempty()) {
-        // garde le plus petit degré déjà connu (le cercle le plus proche).
-        const d = Math.min(existing.data("degree"), n.degree);
-        existing.data("degree", d);
-      } else {
-        cy.add({ group: "nodes", data: { ...n } });
-      }
-      maxDegree = Math.max(maxDegree, n.degree);
-    }
-    for (const e of ego.edges) {
-      const id = `${e.source}__${e.type}__${e.target}`;
-      if (cy.getElementById(id).empty()) {
-        cy.add({ group: "edges", data: { id, source: e.source, target: e.target, type: e.type } });
-      }
-    }
-  });
-  relayout();
-}
-
-async function fetchEgo(cluster, uid, depth) {
-  const url = `${apiBase()}/ego?cluster=${encodeURIComponent(cluster)}&uid=${encodeURIComponent(uid)}&depth=${depth}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`${res.status} ${(await res.json()).error || ""}`);
-  return res.json();
-}
-
-async function loadNodes() {
-  setStatus("chargement…");
-  const res = await fetch(`${apiBase()}/nodes`);
-  if (!res.ok) throw new Error(`/nodes ${res.status}`);
-  const nodes = await res.json();
-  const picker = el("picker");
-  picker.innerHTML = "";
-  for (const n of nodes) {
-    const opt = document.createElement("option");
-    opt.value = JSON.stringify({ cluster: n.cluster, id: n.id });
-    opt.textContent = `${n.kind}/${n.name}${n.namespace ? " ("+n.namespace+")" : ""}`;
-    picker.appendChild(opt);
-  }
-  setStatus(`${nodes.length} nœuds disponibles`);
-}
-
-// Clic sur un nœud : déplie son cercle suivant.
-cy.on("tap", "node", async (evt) => {
-  const node = evt.target;
-  try {
-    setStatus(`expansion de ${node.data("name")}…`);
-    const ego = await fetchEgo(node.data("cluster"), uidOf(node), 1);
-    merge(ego);
-    setStatus(`${cy.nodes().length} nœuds affichés`);
-  } catch (e) { setStatus("erreur : " + e.message); }
-});
-
-el("load").onclick = async () => {
-  try {
-    const picker = el("picker");
-    if (!picker.value) { await loadNodes(); return; }
-    const { cluster, id } = JSON.parse(picker.value);
-    const uid = id.slice(cluster.length + 1);
-    cy.elements().remove(); maxDegree = 0;
-    const ego = await fetchEgo(cluster, uid, parseInt(el("depth").value, 10));
-    merge(ego);
-    setStatus(`${cy.nodes().length} nœuds affichés`);
-  } catch (e) { setStatus("erreur : " + e.message); }
-};
-
-el("reset").onclick = () => { cy.elements().remove(); maxDegree = 0; setStatus("réinitialisé"); };
-
-// Légende.
-el("legend").innerHTML = Object.entries(LAYER_COLORS)
-  .map(([k, c]) => `<span class="chip"><span class="dot" style="background:${c}"></span>${k}</span>`)
-  .join("");
-
-// Au chargement de la page, tente de peupler le menu.
-loadNodes().catch(e => setStatus("API injoignable : " + e.message));
+showFlow();
 </script>
 </body>
 </html>

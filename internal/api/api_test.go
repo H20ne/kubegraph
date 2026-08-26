@@ -106,6 +106,23 @@ func TestNodesListe(t *testing.T) {
 	}
 }
 
+func TestGraph(t *testing.T) {
+	rec := do(testHandler(), "/graph")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status attendu 200, obtenu %d", rec.Code)
+	}
+	var g struct {
+		Nodes []map[string]any `json:"nodes"`
+		Edges []map[string]any `json:"edges"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &g); err != nil {
+		t.Fatalf("JSON invalide : %v", err)
+	}
+	if len(g.Nodes) != 3 || len(g.Edges) != 2 {
+		t.Fatalf("attendu 3 nœuds / 2 arêtes, obtenu %d / %d", len(g.Nodes), len(g.Edges))
+	}
+}
+
 func TestCORS(t *testing.T) {
 	// L'en-tête CORS doit être présent (frontend servi depuis une autre origine).
 	req := httptest.NewRequest(http.MethodGet, "/ego?cluster=test-cluster&uid=d1", nil)

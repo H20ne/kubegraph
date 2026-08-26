@@ -27,6 +27,7 @@ func (h *Handler) Mux() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.health)
 	mux.HandleFunc("GET /nodes", h.nodes)
+	mux.HandleFunc("GET /graph", h.graph)
 	mux.HandleFunc("GET /ego", h.ego)
 	return mux
 }
@@ -70,6 +71,28 @@ func (h *Handler) nodes(w http.ResponseWriter, _ *http.Request) {
 			Name:      n.Name,
 			Layer:     string(n.Layer),
 		})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// graph : GET /graph — tout le graphe (nœuds + arêtes) d'un coup.
+// Sert à construire des vues globales côté client (ex : Sankey de dépendances).
+func (h *Handler) graph(w http.ResponseWriter, _ *http.Request) {
+	srcNodes := h.store.Nodes()
+	srcEdges := h.store.Edges()
+
+	out := graphDTO{
+		Nodes: make([]listNodeDTO, 0, len(srcNodes)),
+		Edges: make([]edgeDTO, 0, len(srcEdges)),
+	}
+	for _, n := range srcNodes {
+		out.Nodes = append(out.Nodes, listNodeDTO{
+			ID: idStr(n.ID), Cluster: n.ID.ClusterID, Kind: n.Kind,
+			Namespace: n.Namespace, Name: n.Name, Layer: string(n.Layer),
+		})
+	}
+	for _, e := range srcEdges {
+		out.Edges = append(out.Edges, edgeDTO{Source: idStr(e.From), Target: idStr(e.To), Type: string(e.Type)})
 	}
 	writeJSON(w, http.StatusOK, out)
 }
@@ -137,6 +160,11 @@ type egoDTO struct {
 	Root  string    `json:"root"`
 	Nodes []nodeDTO `json:"nodes"`
 	Edges []edgeDTO `json:"edges"`
+}
+
+type graphDTO struct {
+	Nodes []listNodeDTO `json:"nodes"`
+	Edges []edgeDTO     `json:"edges"`
 }
 
 // idStr fabrique un identifiant string stable pour le frontend.
