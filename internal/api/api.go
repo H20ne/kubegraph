@@ -16,11 +16,12 @@ const maxDepth = 6
 
 // Handler sert les routes au-dessus d'un store.
 type Handler struct {
-	store *store.Store
+	store       *store.Store
+	ingestToken string // si non vide, exigé sur POST /flows (header X-Ingest-Token)
 }
 
-// New construit le handler.
-func New(s *store.Store) *Handler { return &Handler{store: s} }
+// New construit le handler. token vide = ingestion ouverte (lab).
+func New(s *store.Store, token string) *Handler { return &Handler{store: s, ingestToken: token} }
 
 // Mux enregistre les routes et retourne le multiplexeur.
 func (h *Handler) Mux() *http.ServeMux {
@@ -29,6 +30,7 @@ func (h *Handler) Mux() *http.ServeMux {
 	mux.HandleFunc("GET /nodes", h.nodes)
 	mux.HandleFunc("GET /graph", h.graph)
 	mux.HandleFunc("GET /ego", h.ego)
+	mux.HandleFunc("POST /flows", h.flows)
 	return mux
 }
 
@@ -44,13 +46,40 @@ func (h *Handler) Handler() http.Handler {
 func withCORS(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Ingest-Token")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// flows : POST /flows — l'agent conntrack pousse des connexions observées.
+// Corps : {"flows":[{"src":"10.244.1.5","dst":"10.96.0.10"}, ...]}
+func (h *Handler) flows(w http.ResponseWriter, r *http.Request) {
+	if h.ingestToken != "" && r.Header.Get("X-Ingest-Token") != h.ingestToken {
+		writeError(w, http.StatusUnauthorized, "token d'ingestion invalide")
+		return
+	}
+	var body struct {
+		Flows []struct {
+			Src string `json:"src"`
+			Dst string `json:"dst"`
+		} `json:"flows"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20)).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "JSON invalide")
+		return
+	}
+	added := 0
+	for _, f := range body.Flows {
+		if h.store.AddFlow(f.Src, f.Dst) {
+			added++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]int{"received": len(body.Flows), "new_edges": added})
 }
 
 func (h *Handler) health(w http.ResponseWriter, _ *http.Request) {

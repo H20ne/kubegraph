@@ -1,0 +1,44 @@
+# Agent kubegraph — DaemonSet (option B : trafic observé via conntrack).
+#
+# POUR TON TEST MONO-NŒUD, tu n'as PAS besoin de ce manifeste : lance l'agent
+# directement à côté du hub avec
+#     sudo KUBEGRAPH_INGEST_TOKEN=... HUB_URL=http://localhost:8080 \
+#          /tmp/kg/goroot/bin/go run ./cmd/agent
+#
+# Ce manifeste est pour la version MULTI-NŒUDS. Il suppose une image contenant
+# le binaire agent (à builder et pousser dans un registre accessible au cluster)
+# et un hub joignable à HUB_URL. L'agent est intrusif (hostNetwork + lecture de
+# la table conntrack du noyau) : à faire relire par la sécu.
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kubegraph-agent
+  namespace: kubegraph
+spec:
+  selector:
+    matchLabels: { app: kubegraph-agent }
+  template:
+    metadata:
+      labels: { app: kubegraph-agent }
+    spec:
+      hostNetwork: true          # pour voir la table conntrack du nœud
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists       # tourner sur tous les nœuds, y compris control-plane
+      containers:
+        - name: agent
+          image: REGISTRY/kubegraph-agent:latest   # <-- à builder et remplacer
+          securityContext:
+            readOnlyRootFilesystem: true
+            capabilities:
+              add: ["NET_ADMIN"] # lecture de /proc/net/nf_conntrack
+          env:
+            - name: HUB_URL
+              value: "http://kubegraph-hub.kubegraph.svc:8080"  # <-- ton hub
+            - name: KUBEGRAPH_INGEST_TOKEN
+              valueFrom:
+                secretKeyRef: { name: kubegraph-ingest, key: token }
+          resources:
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { cpu: 100m, memory: 64Mi }

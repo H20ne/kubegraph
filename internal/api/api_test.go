@@ -29,7 +29,7 @@ func testHandler() *Handler {
 			{From: nid("p1"), To: nid("rs1"), Type: graph.EdgeOwnedBy},
 		},
 	)
-	return New(s)
+	return New(s, "")
 }
 
 func do(h *Handler, target string) *httptest.ResponseRecorder {

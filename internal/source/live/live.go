@@ -110,12 +110,18 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 		nodes = append(nodes, s.node(&replicaSets.Items[i].ObjectMeta, "ReplicaSet", graph.LayerWorkload))
 	}
 	for i := range pods.Items {
-		nodes = append(nodes, s.node(&pods.Items[i].ObjectMeta, "Pod", graph.LayerWorkload))
+		p := &pods.Items[i]
+		n := s.node(&p.ObjectMeta, "Pod", graph.LayerWorkload)
+		n.IP = p.Status.PodIP // pour résoudre les flux observés
+		nodes = append(nodes, n)
 	}
 	for i := range services.Items {
 		sv := &services.Items[i]
 		n := s.node(&sv.ObjectMeta, "Service", graph.LayerNetworking)
 		n.NoSelector = len(sv.Spec.Selector) == 0
+		if sv.Spec.ClusterIP != "" && sv.Spec.ClusterIP != "None" {
+			n.IP = sv.Spec.ClusterIP
+		}
 		nodes = append(nodes, n)
 	}
 	for i := range ingresses.Items {

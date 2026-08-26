@@ -15,7 +15,7 @@ import (
 )
 
 // version du binaire (à remplacer par une injection au build plus tard).
-const version = "0.10.0-config"
+const version = "0.11.0-flows"
 
 func main() {
 	// kubeconfig via l'env KUBECONFIG, sinon règles par défaut (~/.kube/config).
@@ -56,7 +56,7 @@ func main() {
 	if addr == "" {
 		addr = ":8080"
 	}
-	handler := api.New(st)
+	handler := api.New(st, os.Getenv("KUBEGRAPH_INGEST_TOKEN"))
 	log.Printf("API kubegraph sur %s — ex : /ego?cluster=%s&uid=<uid>&depth=2", addr, src.ClusterID())
 	log.Fatal(http.ListenAndServe(addr, handler.Handler()))
 }

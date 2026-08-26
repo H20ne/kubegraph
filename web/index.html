@@ -363,13 +363,24 @@ const cyInt = cytoscape({ container: el("cyint"), minZoom:0.2, maxZoom:3, wheelS
   { selector:"node", style:{ "background-color":e=>layerColor(e.data("layer")), "width":26, "height":26, "border-width":0,
     "label":e=>e.data("label"), "font-size":10, "color":"#e6edf3", "text-valign":"bottom", "text-margin-y":5,
     "text-background-color":"#161b22", "text-background-opacity":0.9, "text-background-shape":"roundrectangle", "text-background-padding":3, "min-zoomed-font-size":6 }},
+  // Défaut = déclaré seul (config, jamais observé) : orange pointillé.
   { selector:"edge", style:{ "width":2, "line-color":"#f0883e", "target-arrow-color":"#f0883e", "target-arrow-shape":"triangle",
-    "curve-style":"bezier", "line-style":"dashed", "label":"data(kind)", "font-size":8, "color":"#f0883e", "text-rotation":"autorotate" }},
-  { selector:".faded", style:{ "opacity":0.12 }},
+    "curve-style":"bezier", "line-style":"dashed", "label":"", "font-size":8, "color":"#e6edf3", "text-rotation":"autorotate",
+    "text-background-color":"#161b22", "text-background-opacity":0.9, "text-background-padding":2 }},
+  // Confirmé (configuré ET observé) : vert plein.
+  { selector:'edge[state="both"]', style:{ "line-color":"#3fb950", "target-arrow-color":"#3fb950", "line-style":"solid" }},
+  // Observé mais NON déclaré (trafic surprise = signal sécu) : rouge plein.
+  { selector:'edge[state="talks"]', style:{ "line-color":"#f85149", "target-arrow-color":"#f85149", "line-style":"solid", "width":2.5 }},
+  { selector:"edge.hl", style:{ "label":"data(label)", "width":3.5 }},
+  { selector:".faded", style:{ "opacity":0.1 }},
 ]});
 window.addEventListener("resize", ()=>cyInt.resize());
-cyInt.on("mouseover","node",e=>{ const nb=e.target.closedNeighborhood(); cyInt.elements().addClass("faded"); nb.removeClass("faded"); });
-cyInt.on("mouseout","node",()=>cyInt.elements().removeClass("faded"));
+cyInt.on("mouseover","node",e=>{ const nb=e.target.closedNeighborhood(); cyInt.elements().addClass("faded"); nb.removeClass("faded"); nb.edges().addClass("hl"); });
+cyInt.on("mouseout","node",()=>cyInt.elements().removeClass("faded hl"));
+
+// Services d'infra ubiquitaires : « tout le monde parle à l'API et au DNS »
+// n'apporte rien et noie le graphe. On les masque de la vue des interactions.
+const INFRA_SVC = new Set(["kubernetes","kube-dns","coredns"]);
 
 function renderInteractions(graph){
   const byId={}; for(const n of graph.nodes) byId[n.id]=n;
@@ -377,31 +388,42 @@ function renderInteractions(graph){
   const top=id=>{let c=ownerOf[id],g=0;while(c&&g++<12){const k=byId[c]&&byId[c].kind;if(WKINDS.includes(k))return c;c=ownerOf[c];}return null;};
   // Service -> workload qui le backe (via SELECTS -> pod -> contrôleur de tête).
   const svcWl={}; for(const e of graph.edges) if(e.type==="SELECTS"){ const w=top(e.target); if(w&&!svcWl[e.source]) svcWl[e.source]=w; }
-  // Arêtes d'interaction : USES (config) et TALKS_TO (observé), remappées sur le workload cible.
-  const nodeSet=new Set(), links=[];
+  // Agrège par couple (from->to) : configuré (USES) et/ou observé (TALKS_TO).
+  const nodeSet=new Set(), pairs={};
   for(const e of graph.edges){ if(e.type!=="USES"&&e.type!=="TALKS_TO") continue;
+    const tgt=byId[e.target];
+    if(tgt && tgt.kind==="Service" && INFRA_SVC.has(tgt.name)) continue; // filtre infra
     const from=e.source, to=svcWl[e.target]||e.target;
     if(from===to||!byId[from]||!byId[to]) continue;
-    nodeSet.add(from); nodeSet.add(to); links.push({from,to,kind:e.type==="USES"?"appelle":"trafic"});
+    nodeSet.add(from); nodeSet.add(to);
+    const key=from+"__"+to; const p=pairs[key]||(pairs[key]={from,to,uses:false,talks:false});
+    if(e.type==="USES") p.uses=true; else p.talks=true;
   }
+  const list=Object.values(pairs);
   const empty=el("int-empty");
-  if(!links.length){ cyInt.elements().remove(); empty.style.display="block";
-    empty.innerHTML="Aucune interaction détectée par la config.<br>Tes apps ne référencent peut-être pas les services par nom DNS dans <code>env</code>/<code>args</code> (IP en dur, découverte au runtime…). Le trafic <b>réel</b> viendra de l'agent eBPF (option B).";
-    setStatus("0 interaction (config)"); return; }
+  if(!list.length){ cyInt.elements().remove(); empty.style.display="block";
+    empty.innerHTML="Aucune interaction détectée.<br>Config : tes apps ne référencent peut-être pas les services par nom DNS. Trafic : l'agent conntrack n'a rien poussé (lance <code>go run ./cmd/agent</code> sur le nœud).";
+    setStatus("0 interaction"); return; }
   empty.style.display="none";
   const els=[];
   for(const id of nodeSet){ const n=byId[id]; els.push({group:"nodes",data:{id,label:`${n.kind}/${n.name}`,layer:n.layer}}); }
-  const seen=new Set();
-  for(const l of links){ const eid=`${l.from}__${l.to}`; if(seen.has(eid))continue; seen.add(eid);
-    els.push({group:"edges",data:{id:eid,source:l.from,target:l.to,kind:l.kind}}); }
+  let nBoth=0,nUses=0,nTalks=0;
+  for(const p of list){
+    const state = p.uses&&p.talks ? "both" : p.talks ? "talks" : "uses";
+    const label = state==="both" ? "confirmé" : state==="talks" ? "⚠ non déclaré" : "déclaré";
+    if(state==="both")nBoth++; else if(state==="talks")nTalks++; else nUses++;
+    els.push({group:"edges",data:{id:p.from+"__"+p.to,source:p.from,target:p.to,state,label}});
+  }
   cyInt.elements().remove(); cyInt.add(els);
   cyInt.layout({name:"cose",animate:true,animationDuration:500,nodeRepulsion:8000,idealEdgeLength:120,padding:40}).run();
-  setStatus(`${nodeSet.size} composants · ${seen.size} interactions (config)`);
+  let msg=`${nodeSet.size} composants · ${nBoth} confirmés, ${nUses} déclarés seuls`;
+  if(nTalks) msg+=` · ${nTalks} NON déclarés ⚠`;
+  setStatus(msg);
 }
 
 /* =================== Bascule =================== */
 async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions");
-  el("hint").textContent="Interactions — qui parle à qui, déduit de la config (env/args/ConfigMap → service). Les services sont collapsés sur leur workload. À venir : le trafic RÉEL (agent eBPF) et l'écart config↔trafic.";
+  el("hint").innerHTML="Interactions — qui parle à qui. <b style='color:#f0883e'>Orange pointillé</b> = déclaré (config, jamais observé). <b style='color:#3fb950'>Vert</b> = confirmé (configuré ET observé). <b style='color:#f85149'>Rouge</b> = observé mais NON déclaré (trafic surprise, signal sécu). Survole une arête pour son état.";
   try { renderInteractions(await ensureGraph()); cyInt.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow");
   el("hint").textContent="Flux — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";

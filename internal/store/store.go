@@ -6,23 +6,29 @@ package store
 
 import (
 	"sort"
+	"sync"
 
 	"kubegraph/internal/graph"
 )
 
-// Store est un graphe en mémoire. Non concurrent-safe pour l'instant :
-// le rafraîchissement se fera par remplacement atomique (Load) plus tard.
+// Store est un graphe en mémoire. Les flux observés (conntrack) arrivent en
+// continu via AddFlow pendant que /graph lit : d'où le RWMutex.
 type Store struct {
-	nodes map[graph.NodeID]graph.Node
-	edges []graph.Edge
-	adj   map[graph.NodeID][]graph.NodeID
+	mu      sync.RWMutex
+	nodes   map[graph.NodeID]graph.Node
+	edges   []graph.Edge
+	adj     map[graph.NodeID][]graph.NodeID
+	ipIndex map[string]graph.NodeID // IP -> nœud (pods + services)
+	flows   map[graph.Edge]struct{} // arêtes TALKS_TO observées (dédupliquées)
 }
 
 // New crée un store vide.
 func New() *Store {
 	return &Store{
-		nodes: make(map[graph.NodeID]graph.Node),
-		adj:   make(map[graph.NodeID][]graph.NodeID),
+		nodes:   make(map[graph.NodeID]graph.Node),
+		adj:     make(map[graph.NodeID][]graph.NodeID),
+		ipIndex: make(map[string]graph.NodeID),
+		flows:   make(map[graph.Edge]struct{}),
 	}
 }
 
@@ -32,12 +38,34 @@ func New() *Store {
 func (s *Store) Load(nodes []graph.Node, edges []graph.Edge) {
 	for _, n := range nodes {
 		s.nodes[n.ID] = n
+		if n.IP != "" {
+			s.ipIndex[n.IP] = n.ID
+		}
 	}
 	for _, e := range edges {
 		s.edges = append(s.edges, e)
 		s.adj[e.From] = append(s.adj[e.From], e.To)
 		s.adj[e.To] = append(s.adj[e.To], e.From)
 	}
+}
+
+// AddFlow enregistre une connexion observée (src IP -> dst IP). Résout les deux
+// IP en nœuds ; si les deux sont connues et distinctes, ajoute une arête
+// TALKS_TO. Retourne true si une nouvelle arête a été créée.
+func (s *Store) AddFlow(srcIP, dstIP string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	from, okF := s.ipIndex[srcIP]
+	to, okT := s.ipIndex[dstIP]
+	if !okF || !okT || from == to {
+		return false
+	}
+	e := graph.Edge{From: from, To: to, Type: graph.EdgeTalksTo}
+	if _, seen := s.flows[e]; seen {
+		return false
+	}
+	s.flows[e] = struct{}{}
+	return true
 }
 
 // EgoNode est un nœud du sous-graphe, avec son degré (= son cercle).
@@ -114,10 +142,16 @@ func (s *Store) Ego(root graph.NodeID, depth int) (SubGraph, bool) {
 // Len retourne le nombre de nœuds stockés.
 func (s *Store) Len() int { return len(s.nodes) }
 
-// Edges retourne une copie de toutes les arêtes du graphe.
+// Edges retourne une copie de toutes les arêtes : structurelles + config, plus
+// les flux observés (TALKS_TO) accumulés via AddFlow.
 func (s *Store) Edges() []graph.Edge {
-	out := make([]graph.Edge, len(s.edges))
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]graph.Edge, len(s.edges), len(s.edges)+len(s.flows))
 	copy(out, s.edges)
+	for e := range s.flows {
+		out = append(out, e)
+	}
 	return out
 }
 

@@ -6,6 +6,7 @@ package graph
 // Origin indique d'où vient l'information portée par un nœud ou une arête.
 //   - observed : lu depuis un cluster réel (état réel).
 //   - declared : lu depuis du Git / des manifestes (état déclaré).
+//
 // Croiser les deux permettra plus tard la détection de drift.
 type Origin string
 
@@ -50,6 +51,10 @@ type Node struct {
 	// (kubernetes, ExternalName, headless à endpoints externes). Un tel service
 	// n'a pas de pods par conception → ne pas le marquer "cassé".
 	NoSelector bool
+
+	// IP : pod IP (status.podIP) ou ClusterIP du service. Sert à résoudre les
+	// flux observés (conntrack) en nœuds. Vide si sans IP routable.
+	IP string
 }
 
 // EdgeType énumère les relations reconnues entre nœuds. On démarre le MVP avec
@@ -67,6 +72,7 @@ const (
 	EdgeTriggers EdgeType = "TRIGGERS" // Service source (ex: Kafka) -> ScaledObject (trigger KEDA)
 	EdgeUses     EdgeType = "USES"     // Workload -> Service référencé dans sa config (env/ConfigMap)
 	EdgeAllows   EdgeType = "ALLOWS"   // NetworkPolicy : connectivité autorisée (déclarée, pas observée)
+	EdgeTalksTo  EdgeType = "TALKS_TO" // Trafic RÉEL observé (conntrack/eBPF) : src -> dst
 )
 
 // Edge est une relation dirigée entre deux nœuds.

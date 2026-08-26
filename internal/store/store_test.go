@@ -81,6 +81,34 @@ func TestEgoFromService(t *testing.T) {
 	}
 }
 
+func TestAddFlow(t *testing.T) {
+	s := New()
+	s.Load([]graph.Node{
+		{ID: nid("a"), Kind: "Pod", IP: "10.0.0.1"},
+		{ID: nid("b"), Kind: "Pod", IP: "10.0.0.2"},
+	}, nil)
+
+	if !s.AddFlow("10.0.0.1", "10.0.0.2") {
+		t.Fatal("première connexion : nouvelle arête attendue")
+	}
+	if s.AddFlow("10.0.0.1", "10.0.0.2") {
+		t.Error("doublon : ne devrait pas recréer d'arête")
+	}
+	if s.AddFlow("10.0.0.1", "9.9.9.9") {
+		t.Error("IP inconnue : ne devrait pas créer d'arête")
+	}
+
+	var found bool
+	for _, e := range s.Edges() {
+		if e.Type == graph.EdgeTalksTo && e.From == nid("a") && e.To == nid("b") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("arête TALKS_TO absente de Edges()")
+	}
+}
+
 func TestEgoInconnu(t *testing.T) {
 	if _, ok := fixture().Ego(nid("absent"), 1); ok {
 		t.Error("un nœud absent devrait retourner ok=false")
