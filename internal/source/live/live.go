@@ -167,6 +167,21 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 	nodes = append(nodes, np...)
 	edges = append(edges, ne...)
 
+	// Ressources complémentaires : Jobs, CronJobs, HPA, PVC/PV, PDB.
+	// Index "Kind/namespace/name" -> UID pour les cibles de HPA (scaleTargetRef).
+	wlByName := map[string]string{}
+	for i := range deployments.Items {
+		d := &deployments.Items[i]
+		wlByName["Deployment/"+d.Namespace+"/"+d.Name] = string(d.UID)
+	}
+	for i := range statefulSets.Items {
+		st := &statefulSets.Items[i]
+		wlByName["StatefulSet/"+st.Namespace+"/"+st.Name] = string(st.UID)
+	}
+	xn, xe := s.collectWorkloadExtras(ctx, pods.Items, topWL, wlByName)
+	nodes = append(nodes, xn...)
+	edges = append(edges, xe...)
+
 	return nodes, edges, nil
 }
 

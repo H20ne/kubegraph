@@ -10,7 +10,7 @@
 <style>
   :root {
     --bg:#0e1116; --panel:#161b22; --panel2:#1c2230; --border:#2a313c;
-    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ok:#3fb950; --bad:#f85149; --warn:#e3b341;
+    --text:#e6edf3; --muted:#8b949e; --accent:#58a6ff; --ui:#5fb3c9; --ok:#3fb950; --bad:#f85149; --warn:#e3b341;
     --workload:#58a6ff; --networking:#3fb950; --config:#bc8cff; --security:#f85149; --unknown:#8b949e;
   }
   * { box-sizing:border-box; }
@@ -18,26 +18,54 @@
   body { margin:0; background:var(--bg); color:var(--text);
     font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
     display:flex; flex-direction:column; height:100vh; }
-  header { padding:10px 16px; background:var(--panel); border-bottom:1px solid var(--border);
+  header { padding:11px 18px;
+    background:linear-gradient(180deg,#1a2029,#12161d);
+    border-bottom:1px solid rgba(255,255,255,.07);
+    box-shadow:0 1px 0 rgba(255,255,255,.03) inset, 0 10px 26px -20px #000;
     display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
-  .brand { font-weight:700; font-size:15px; margin-right:4px; }
-  .brand span { color:var(--accent); }
-  label { font-size:12px; color:var(--muted); display:inline-flex; align-items:center; gap:6px; }
+  .brand { font-weight:700; font-size:15px; margin-right:6px; letter-spacing:.2px;
+    display:inline-flex; align-items:center; gap:8px; }
+  .brand::before { content:""; width:9px; height:9px; border-radius:50%;
+    background:radial-gradient(circle at 32% 30%, #8fe0f0, #2f8fa6);
+    box-shadow:0 0 9px 1px rgba(95,179,201,.55); }
+  .brand span { color:var(--ui); }
+  label { font-size:11px; color:var(--muted); display:inline-flex; align-items:center; gap:7px;
+    text-transform:uppercase; letter-spacing:.5px; font-weight:600; }
   select,input[type=text],input[type=number],button {
-    font:inherit; padding:6px 9px; border:1px solid var(--border); border-radius:7px;
-    background:var(--panel2); color:var(--text); outline:none; }
-  select:focus,input:focus { border-color:var(--accent); }
+    font:inherit; font-size:12.5px; text-transform:none; letter-spacing:0; font-weight:500;
+    height:32px; padding:0 11px; border:1px solid rgba(255,255,255,.09); border-radius:9px;
+    background:rgba(255,255,255,.03); color:var(--text); outline:none;
+    transition:border-color .15s, background .15s, box-shadow .15s; }
+  select:hover,input:hover { border-color:rgba(255,255,255,.17); }
+  select:focus,input:focus { border-color:var(--ui); box-shadow:0 0 0 3px rgba(95,179,201,.16); }
   input[type=number]{ width:56px; }
-  button { cursor:pointer; transition:background .15s,border-color .15s; }
-  button:hover { border-color:var(--accent); }
-  .tabs { display:inline-flex; background:var(--panel2); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
-  .tabs button { border:0; border-radius:0; background:transparent; padding:6px 14px; color:var(--muted); }
-  .tabs button.active { background:var(--accent); color:#06101f; font-weight:600; }
+  button { cursor:pointer; font-weight:600; }
+  button:hover { border-color:var(--ui); background:rgba(95,179,201,.09); }
+  #refresh { color:#08121a; font-weight:700; border-color:transparent;
+    background:linear-gradient(180deg,#7fd3e3,#4aa6bb);
+    box-shadow:0 1px 0 rgba(255,255,255,.35) inset, 0 6px 16px -8px rgba(74,166,187,.65); }
+  #refresh:hover { background:linear-gradient(180deg,#8fdcec,#54b2c7); border-color:transparent; }
+  /* Onglets : segmented control encastré, actif = puce tube + accent teal. */
+  .tabs { display:inline-flex; gap:2px; padding:3px;
+    background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.06);
+    border-radius:11px; box-shadow:0 1px 2px rgba(0,0,0,.4) inset; }
+  .tabs button { height:auto; border:0; border-radius:8px; background:transparent;
+    padding:6px 14px; color:var(--muted); font-weight:600; font-size:12.5px; box-shadow:none;
+    transition:color .15s, background .15s; }
+  .tabs button:hover { color:var(--text); background:rgba(255,255,255,.045); border-color:transparent; }
+  .tabs button.active { color:#eafcff; font-weight:700; position:relative;
+    background:linear-gradient(180deg,#243244,#141b26);
+    box-shadow:0 1px 0 rgba(255,255,255,.08) inset,
+               0 0 0 1px rgba(95,179,201,.35),
+               0 7px 16px -10px rgba(95,179,201,.5); }
+  .tabs button.active::after { content:""; position:absolute; left:12px; right:12px; bottom:3px;
+    height:2px; border-radius:2px; background:linear-gradient(90deg,#5fb3c9,#8fe0f0);
+    box-shadow:0 0 8px 1px rgba(95,179,201,.55); }
   #flow-controls, #explorer-controls, #int-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
   body[data-mode="flow"] #flow-controls { display:flex; }
   body[data-mode="explore"] #explorer-controls { display:flex; }
   body[data-mode="interactions"] #int-controls { display:inline-flex; }
-  .switch { font-size:12px; color:var(--muted); }
+  .switch { font-size:12px; color:var(--muted); text-transform:none; letter-spacing:0; font-weight:500; }
   .hint { font-size:12px; color:var(--muted); padding:8px 16px 0; }
   .stage { flex:1; min-height:0; position:relative; display:flex; }
   #flow-wrap, #sankey-wrap { flex:1; min-height:0; overflow:auto; display:none; }
@@ -59,7 +87,8 @@
   .kv { display:grid; grid-template-columns:84px 1fr; gap:4px 10px; font-size:13px; margin-bottom:14px; }
   .kv dt { color:var(--muted); } .kv dd { margin:0; word-break:break-all; }
   .pill { display:inline-block; padding:2px 8px; border-radius:20px; font-size:11px; font-weight:600; color:#06101f; }
-  aside button.full { width:100%; margin-top:4px; background:var(--accent); color:#06101f; font-weight:600; border-color:transparent; }
+  aside button.full { width:100%; height:34px; margin-top:4px; color:#08121a; font-weight:700; border-color:transparent;
+    background:linear-gradient(180deg,#7fd3e3,#4aa6bb); }
   .zoombar { position:absolute; left:14px; bottom:14px; display:flex; gap:6px; z-index:5; }
   .zoombar button { width:34px; height:34px; padding:0; font-size:16px; background:var(--panel); }
   #legend { padding:9px 16px; border-top:1px solid var(--border); display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--muted); align-items:center; }
@@ -129,7 +158,8 @@
 <script>
 const LAYER = {
   workload:{color:"#58a6ff",label:"workload"}, networking:{color:"#3fb950",label:"networking"},
-  config:{color:"#bc8cff",label:"config"}, security:{color:"#f85149",label:"security"}, unknown:{color:"#8b949e",label:"unknown"},
+  config:{color:"#bc8cff",label:"config"}, storage:{color:"#d0a15e",label:"storage"},
+  security:{color:"#f85149",label:"security"}, unknown:{color:"#8b949e",label:"unknown"},
 };
 const layerColor = l => (LAYER[l]||LAYER.unknown).color;
 const el = id => document.getElementById(id);
@@ -149,7 +179,7 @@ async function ensureNodes() { if (!gNodes) gNodes = await fetchJSON("/nodes"); 
 /* =================== FLUX — Sankey de dépendances =================== */
 // 4 colonnes : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress.
 // Le ReplicaSet est collapsé (on remonte le pod jusqu'à son contrôleur de tête).
-const WKINDS = ["Deployment","StatefulSet","DaemonSet"];
+const WKINDS = ["Deployment","StatefulSet","DaemonSet","Job"];
 const COLS = ["Workload","Pod","Service","Ingress"];
 const colOf = k => WKINDS.includes(k) ? 0 : k==="Pod" ? 1 : k==="Service" ? 2 : k==="Ingress" ? 3 : -1;
 
@@ -190,10 +220,13 @@ function renderFlow(graph, ns) {
     if (w && byId[w] && inNs(byId[w])) links.push({ s: w, t: n.id });
   }
   // Pod -> Service (SELECTS inversé) et Service -> Ingress (ROUTES_TO inversé).
+  // On n'accepte QUE des liens entre types de colonnes du flux (Workload/Pod/
+  // Service/Ingress) : une arête SELECTS d'un PDB (hors colonnes) est ignorée ici.
   for (const e of graph.edges) {
     if (e.type !== "SELECTS" && e.type !== "ROUTES_TO") continue;
     const s = byId[e.target], t = byId[e.source];
     if (!s || !t || !inNs(s) || !inNs(t)) continue;
+    if (colOf(s.kind) < 0 || colOf(t.kind) < 0) continue;
     links.push({ s: e.target, t: e.source });
   }
   const out = {}, inc = {};
@@ -305,16 +338,22 @@ function renderFlow(graph, ns) {
   const isSrc = id => !(inL[id] && inL[id].length);
 
   let defs=`<filter id="fsoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`;
+  // Ombre portée douce et diffuse (pods + services).
+  defs+=`<filter id="fsh" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="3.6"/></filter>`;
+  // Dégradé de lumière au DÉBUT de chaque flux (à la source), qui s'éteint vite.
+  defs+=`<linearGradient id="flxstart" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#eafcff" stop-opacity=".26"/><stop offset=".09" stop-color="#eafcff" stop-opacity="0"/></linearGradient>`;
   let rib="", nodes="", labels="", gi=0;
   for (const l of flinks) { const P=pos[l.s], Q=pos[l.t], c0=KCOL(byId[l.s].kind), id="fg"+(gi++);
     defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">`+
       `<stop offset="0" stop-color="${c0}" stop-opacity=".8"/>`+
       `<stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/>`+
       `<stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
-    rib+=`<path d="${band(P.x+nodeW-1, l.sy, l.sth, Q.x+2, l.ty, l.tth)}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
+    const d=band(P.x+nodeW-1, l.sy, l.sth, Q.x+2, l.ty, l.tth);
+    rib+=`<path d="${d}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
+    // Voile de lumière superposé, uniquement à l'amorce du flux.
+    rib+=`<path d="${d}" fill="url(#flxstart)"/>`;
   }
-  // Nœud « éclairé » : corps en dégradé tube + liseré coloré diffus + reflet blanc.
-  // Même effet pour les workloads sources ET les pods (couleur du kind inchangée).
+  // Workload source « éclairé » : corps en dégradé tube + liseré coloré diffus + reflet blanc.
   const litNode = (p, cap, ttl, rx) => {
     const gid="fsrc"+(gi++);
     defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
@@ -327,12 +366,13 @@ function renderFlow(graph, ns) {
     const cap = bad ? "#ef4444" : idle ? "#e0a94a" : KCOL(n.kind);
     const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
     const ttl = `<title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}${extra}</title>`;
-    // Éclairé : workload source (col 0) ou pod (col 1), hors cas cassé/idle.
-    const lit = !bad && !idle && ((isSrc(n.id) && c===0) || c===1);
-    if (lit) {
-      nodes+=litNode(p, cap, ttl, c===0 ? 4 : 3);
+    if (!bad && !idle && isSrc(n.id) && c===0) {
+      nodes+=litNode(p, cap, ttl, 4);
     } else {
+      // Carré plein, net (le pod compris) — l'effet de lumière est porté par les FLUX.
       const glow = bad ? ' filter="url(#fsoft)"' : '';
+      // Pod & Service : ombre portée très légère et diffuse à droite (profondeur).
+      if ((c===1||c===2) && !bad) nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#fsh)"/>`;
       nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}"${glow}>${ttl}</rect>`;
     }
     const tag = bad ? " ⚠" : idle ? " ·0" : "";
@@ -522,6 +562,8 @@ function renderInteractions(graph){
   const pairs={}, backsDep=new Set();
   for(const e of graph.edges){ if(e.type!=="USES"&&e.type!=="TALKS_TO") continue;
     const tgt=byId[e.target]; if(tgt&&tgt.kind==="Service"&&INFRA_SVC.has(tgt.name)) continue;
+    // Les montages de stockage (workload -> PVC) ne sont PAS du trafic : on les ignore ici.
+    if(tgt&&(tgt.kind==="PersistentVolumeClaim"||tgt.kind==="PersistentVolume")) continue;
     const from=resolveWl(e.source); if(!from||!byId[from]||!okNs(from)) continue;
     let depSvc=null, depWl=null;
     if(tgt&&tgt.kind==="Service"){ depSvc=e.target; depWl=svcWl[e.target]||null; }

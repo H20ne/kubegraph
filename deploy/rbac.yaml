@@ -29,11 +29,23 @@ rules:
   # NetworkPolicies). NB : on ne demande PAS "secrets" — les secrets utilisés
   # sont déduits des specs des workloads, sans jamais lire leurs valeurs.
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "namespaces"]
+    resources: ["pods", "services", "configmaps", "namespaces", "persistentvolumeclaims", "persistentvolumes"]
     verbs: ["get", "list", "watch"]
   # Workloads : Deployments, ReplicaSets, StatefulSets, DaemonSets.
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  # Travail ponctuel/planifié : Jobs, CronJobs.
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  # Scaling natif : HorizontalPodAutoscaler.
+  - apiGroups: ["autoscaling"]
+    resources: ["horizontalpodautoscalers"]
+    verbs: ["get", "list", "watch"]
+  # Résilience : PodDisruptionBudget.
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
     verbs: ["get", "list", "watch"]
   # Réseau : Ingresses + NetworkPolicies (base déclarée pour la détection de dérive).
   - apiGroups: ["networking.k8s.io"]
