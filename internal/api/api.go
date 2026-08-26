@@ -18,10 +18,15 @@ const maxDepth = 6
 type Handler struct {
 	store       *store.Store
 	ingestToken string // si non vide, exigé sur POST /flows (header X-Ingest-Token)
+	webDir      string // si non vide, sert le dashboard statique à la racine "/"
 }
 
 // New construit le handler. token vide = ingestion ouverte (lab).
 func New(s *store.Store, token string) *Handler { return &Handler{store: s, ingestToken: token} }
+
+// SetWebDir active le service du dashboard statique (index.html + assets) à la
+// racine, servi PAR le hub. Vide = désactivé (le front est servi ailleurs).
+func (h *Handler) SetWebDir(dir string) { h.webDir = dir }
 
 // Mux enregistre les routes et retourne le multiplexeur.
 func (h *Handler) Mux() *http.ServeMux {
@@ -31,6 +36,11 @@ func (h *Handler) Mux() *http.ServeMux {
 	mux.HandleFunc("GET /graph", h.graph)
 	mux.HandleFunc("GET /ego", h.ego)
 	mux.HandleFunc("POST /flows", h.flows)
+	// Dashboard servi par le hub : "/" attrape tout ce qui n'est pas une route
+	// API ci-dessus. http.FileServer sert index.html pour "/" automatiquement.
+	if h.webDir != "" {
+		mux.Handle("GET /", http.FileServer(http.Dir(h.webDir)))
+	}
 	return mux
 }
 

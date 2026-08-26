@@ -70,11 +70,27 @@ func main() {
 		addr = ":8080"
 	}
 	handler := api.New(st, os.Getenv("KUBEGRAPH_INGEST_TOKEN"))
+
+	// Dashboard servi PAR le hub : plus besoin d'un serveur statique séparé.
+	// Dossier : $KUBEGRAPH_WEB, sinon "web" à côté du binaire s'il existe.
+	webDir := os.Getenv("KUBEGRAPH_WEB")
+	if webDir == "" {
+		if _, err := os.Stat("web/index.html"); err == nil {
+			webDir = "web"
+		}
+	}
+	if webDir != "" {
+		handler.SetWebDir(webDir)
+	}
+
 	mode := "hub"
 	if agentMode {
 		mode = "hub + agent embarqué"
 	}
 	log.Printf("kubegraph (%s) sur %s — API /graph, /nodes, /ego", mode, addr)
+	if webDir != "" {
+		log.Printf("dashboard servi sur http://localhost%s/ (dossier %q)", addr, webDir)
+	}
 	log.Fatal(http.ListenAndServe(addr, handler.Handler()))
 }
 

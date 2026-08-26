@@ -133,10 +133,12 @@ const LAYER = {
 };
 const layerColor = l => (LAYER[l]||LAYER.unknown).color;
 const el = id => document.getElementById(id);
-const apiBase = () => el("api").value.replace(/\/+$/,"");
+const apiBase = () => (el("api").value.trim().replace(/\/+$/,"") || location.origin);
 const setStatus = t => { el("status").textContent = t; };
 const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 try { const s = localStorage.getItem("kubegraph_api"); if (s) el("api").value = s; } catch (_) {}
+// Servi par le hub (http) sans réglage explicite ? l'API est la même origine.
+try { if (location.protocol.startsWith("http") && !localStorage.getItem("kubegraph_api")) el("api").value = location.origin; } catch (_) {}
 el("api").addEventListener("change", () => { try { localStorage.setItem("kubegraph_api", el("api").value); } catch (_) {} });
 
 let gGraph = null, gNodes = null;
@@ -311,17 +313,24 @@ function renderFlow(graph, ns) {
       `<stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
     rib+=`<path d="${band(P.x+nodeW-1, l.sy, l.sth, Q.x+2, l.ty, l.tth)}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
   }
+  // Nœud « éclairé » : corps en dégradé tube + liseré coloré diffus + reflet blanc.
+  // Même effet pour les workloads sources ET les pods (couleur du kind inchangée).
+  const litNode = (p, cap, ttl, rx) => {
+    const gid="fsrc"+(gi++);
+    defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
+    return `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="${rx}" fill="url(#${gid})" stroke="rgba(255,255,255,.1)">${ttl}</rect>`
+      +`<rect x="${p.x+nodeW-2.5}" y="${p.y}" width="2.5" height="${p.h}" rx="1.5" fill="${cap}" filter="url(#fsoft)"/>`
+      +`<rect x="${p.x+nodeW-1.5}" y="${p.y+1}" width="1.5" height="${Math.max(0,p.h-2)}" fill="#eef3fb"/>`;
+  };
   for (let c = 0; c < 4; c++) for (const n of col[c]) {
     const p = pos[n.id], v = pv[n.id]||0, bad = isBad(n), idle = isIdle(n);
     const cap = bad ? "#ef4444" : idle ? "#e0a94a" : KCOL(n.kind);
     const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
     const ttl = `<title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}${extra}</title>`;
-    if (isSrc(n.id) && c===0 && !bad && !idle) {
-      const gid="fsrc"+n.id.replace(/[^a-zA-Z0-9]/g,"");
-      defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
-      nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="4" fill="url(#${gid})" stroke="rgba(255,255,255,.1)">${ttl}</rect>`;
-      nodes+=`<rect x="${p.x+nodeW-2.5}" y="${p.y}" width="2.5" height="${p.h}" rx="1.5" fill="${cap}" filter="url(#fsoft)"/>`;
-      nodes+=`<rect x="${p.x+nodeW-1.5}" y="${p.y+1}" width="1.5" height="${p.h-2}" fill="#eef3fb"/>`;
+    // Éclairé : workload source (col 0) ou pod (col 1), hors cas cassé/idle.
+    const lit = !bad && !idle && ((isSrc(n.id) && c===0) || c===1);
+    if (lit) {
+      nodes+=litNode(p, cap, ttl, c===0 ? 4 : 3);
     } else {
       const glow = bad ? ' filter="url(#fsoft)"' : '';
       nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}"${glow}>${ttl}</rect>`;
