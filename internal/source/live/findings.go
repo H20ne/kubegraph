@@ -17,6 +17,7 @@ package live
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -93,6 +94,28 @@ func (s *Source) computeFindings(ctx context.Context, pods []corev1.Pod, service
 			}
 		}
 		chk := func(c *corev1.Container) {
+			// Image mutable : tag :latest ou absence de tag (non reproductible, supply-chain).
+			img := c.Image
+			if at := strings.LastIndex(img, "@"); at < 0 { // pas d'ancrage par digest
+				last := img
+				if sl := strings.LastIndex(img, "/"); sl >= 0 {
+					last = img[sl+1:]
+				}
+				if !strings.Contains(last, ":") || strings.HasSuffix(img, ":latest") {
+					emit(key("img"), graph.SevLow, "pod", "Image mutable (:latest / sans tag)", "L'image n'est pas épinglée (tag :latest ou absent, pas de digest) : build non reproductible, risque supply-chain.", "NIST SP 800-190 §3.1 ; CIS Kubernetes Benchmark §5.5", a, nil)
+				}
+			}
+			// Pas de limites de ressources : voisin bruyant / épuisement (DoS).
+			lim := c.Resources.Limits
+			if lim == nil || (lim.Cpu().IsZero() && lim.Memory().IsZero()) {
+				emit(key("nolimit"), graph.SevLow, "pod", "Pas de limites de ressources", "Aucune limite CPU/mémoire : un conteneur compromis ou buggé peut épuiser le nœud (déni de service).", "CIS Kubernetes Benchmark §5.7 ; NIST SP 800-190", a, nil)
+			}
+			for _, port := range c.Ports {
+				if port.HostPort != 0 {
+					emit(key("hostport"), graph.SevMedium, "pod", fmt.Sprintf("hostPort exposé (%d)", port.HostPort), "Le conteneur réserve un port sur le nœud lui-même : contourne les Services/NetworkPolicies et expose directement l'hôte.", "CIS Kubernetes Benchmark §5.2.4", a, nil)
+					break
+				}
+			}
 			sc := c.SecurityContext
 			if sc == nil {
 				return
@@ -103,10 +126,13 @@ func (s *Source) computeFindings(ctx context.Context, pods []corev1.Pod, service
 			if sc.AllowPrivilegeEscalation != nil && *sc.AllowPrivilegeEscalation {
 				emit(key("pesc"), graph.SevMedium, "pod", "allowPrivilegeEscalation=true", "Le process peut gagner plus de privilèges que son parent (binaire setuid).", "CIS Kubernetes Benchmark §5.2.5", a, nil)
 			}
+			if sc.ReadOnlyRootFilesystem == nil || !*sc.ReadOnlyRootFilesystem {
+				emit(key("rwfs"), graph.SevLow, "pod", "Filesystem racine inscriptible", "readOnlyRootFilesystem n'est pas activé : un attaquant peut écrire dans le conteneur (persistance, dépose d'outils).", "CIS Kubernetes Benchmark §5.2.12", a, nil)
+			}
 			if sc.Capabilities != nil {
 				for _, c2 := range sc.Capabilities.Add {
 					switch string(c2) {
-					case "ALL", "SYS_ADMIN", "NET_ADMIN", "SYS_PTRACE", "SYS_MODULE":
+					case "ALL", "SYS_ADMIN", "NET_ADMIN", "NET_RAW", "SYS_PTRACE", "SYS_MODULE", "SYS_RAWIO", "SYS_BOOT", "DAC_READ_SEARCH", "DAC_OVERRIDE", "BPF", "PERFMON":
 						emit(key("cap"), graph.SevHigh, "pod", "Capability dangereuse ("+string(c2)+")", "Cette capability étend fortement les droits du conteneur (proche d'un accès hôte).", "CIS Kubernetes Benchmark §5.2.8-9", a, nil)
 					}
 				}
@@ -140,6 +166,19 @@ func (s *Source) computeFindings(ctx context.Context, pods []corev1.Pod, service
 		if (ps.ServiceAccountName == "" || ps.ServiceAccountName == "default") && (ps.AutomountServiceAccountToken == nil || *ps.AutomountServiceAccountToken) {
 			emit(key("defsa"), graph.SevLow, "pod", "SA 'default' + token monté", "Tourne sous le ServiceAccount 'default' avec son token monté : identité partagée, moindre privilège non respecté.", "CIS Kubernetes Benchmark §5.1.5-5.1.6", a, nil)
 		}
+		if ps.ShareProcessNamespace != nil && *ps.ShareProcessNamespace {
+			emit(key("shareproc"), graph.SevMedium, "pod", "shareProcessNamespace activé", "Les conteneurs du pod partagent leurs process : un conteneur compromis voit et cible les autres.", "NIST SP 800-190", a, nil)
+		}
+		// Pas de profil seccomp (ni au pod, ni sur un conteneur) : aucun filtrage d'appels système.
+		seccomp := ps.SecurityContext != nil && ps.SecurityContext.SeccompProfile != nil
+		for j := range ps.Containers {
+			if sc := ps.Containers[j].SecurityContext; sc != nil && sc.SeccompProfile != nil {
+				seccomp = true
+			}
+		}
+		if !seccomp {
+			emit(key("seccomp"), graph.SevLow, "pod", "Pas de profil seccomp", "Aucun seccompProfile : les appels système ne sont pas filtrés, la surface noyau est maximale.", "CIS Kubernetes Benchmark §5.7.2 ; NIST SP 800-190", a, nil)
+		}
 	}
 
 	// ---------- EXPOSITION ----------
@@ -152,6 +191,9 @@ func (s *Source) computeFindings(ctx context.Context, pods []corev1.Pod, service
 		if t := sv.Spec.Type; t == corev1.ServiceTypeLoadBalancer || t == corev1.ServiceTypeNodePort {
 			emit("exp/svc/"+string(sv.UID), graph.SevMedium, "exposure", "Service "+string(t), "Ce service est atteignable hors du cluster ("+string(t)+") : surface d'attaque exposée.", "NIST SP 800-190 §3.3", nid(string(sv.UID)), nil)
 		}
+		if len(sv.Spec.ExternalIPs) > 0 {
+			emit("exp/eip/"+string(sv.UID), graph.SevMedium, "exposure", "Service avec externalIPs", "Le service publie des externalIPs : trafic routé vers le pod depuis l'extérieur, hors des contrôles habituels.", "NIST SP 800-190 §3.3", nid(string(sv.UID)), nil)
+		}
 	}
 	podsByNs := map[string][]*corev1.Pod{}
 	for i := range pods {
@@ -159,6 +201,7 @@ func (s *Source) computeFindings(ctx context.Context, pods []corev1.Pod, service
 	}
 	for i := range ingresses {
 		ing := &ingresses[i]
+		noTLS := len(ing.Spec.TLS) == 0
 		names := map[string]bool{}
 		if ing.Spec.DefaultBackend != nil && ing.Spec.DefaultBackend.Service != nil {
 			names[ing.Spec.DefaultBackend.Service.Name] = true
@@ -187,6 +230,9 @@ func (s *Source) computeFindings(ctx context.Context, pods []corev1.Pod, service
 					continue
 				}
 				emit("exp/ing/"+w, graph.SevMedium, "exposure", "Exposé via Ingress", "Ce workload est atteignable depuis l'extérieur via un Ingress ("+ing.Name+") : porte d'entrée à surveiller.", "NIST SP 800-190 §3.3", nid(w), nil)
+				if noTLS {
+					emit("exp/tls/"+w, graph.SevLow, "exposure", "Ingress sans TLS", "L'Ingress ("+ing.Name+") n'a pas de section TLS : trafic potentiellement en clair (interception, vol de session).", "OWASP ; CIS Kubernetes Benchmark §5.3", nid(w), nil)
+				}
 			}
 		}
 	}
@@ -327,6 +373,21 @@ func rateRules(rules []rbacv1.PolicyRule, cluster bool) (graph.Severity, string,
 		}
 		if has(r.Resources, "pods", "deployments", "daemonsets", "*") && has(r.Verbs, "create", "*") {
 			up(graph.SevMedium, "Peut créer des workloads", "create pods/deployments : peut lancer un pod privilégié pour escalader.")
+		}
+		if has(r.Resources, "certificatesigningrequests", "certificatesigningrequests/approval", "*") && has(r.Verbs, "create", "update", "approve", "*") {
+			up(graph.SevHigh, "Peut émettre/approuver des certificats", "Contrôle des CSR : peut se forger un certificat client au nom de n'importe quelle identité (escalade).")
+		}
+		if has(r.Resources, "validatingwebhookconfigurations", "mutatingwebhookconfigurations", "*") && has(r.Verbs, "create", "update", "patch", "*") {
+			up(graph.SevHigh, "Peut modifier l'admission control", "Écriture des webhooks d'admission : peut intercepter/altérer toute création d'objet (backdoor cluster).")
+		}
+		if has(r.Resources, "pods/portforward") && has(r.Verbs, "create", "*") {
+			up(graph.SevMedium, "Peut port-forward vers les pods", "create pods/portforward : tunnel réseau direct vers des pods, contourne les Services.")
+		}
+		if has(r.Resources, "nodes", "nodes/proxy", "*") && has(r.Verbs, "get", "list", "create", "*") {
+			up(graph.SevMedium, "Accès aux nœuds", "Droit sur les nodes / nodes/proxy : lecture kubelet, accès aux pods de l'hôte.")
+		}
+		if has(r.Resources, "*") && has(r.Verbs, "get", "list", "watch") && !has(r.Verbs, "*") {
+			up(graph.SevMedium, "Lecture étendue du cluster", "get/list/watch sur * : visibilité sur toutes les ressources (reconnaissance, fuite de config).")
 		}
 	}
 	return best, title, why

@@ -541,7 +541,9 @@ function makePanZoom(host){
     const vb = svg.viewBox && svg.viewBox.baseVal;
     const sw = (vb && vb.width) || 1, sh = (vb && vb.height) || 1;
     const cw = wrap.clientWidth||1, ch = wrap.clientHeight||1;
-    st.scale = Math.min(cw/sw, ch/sh, 1) * 0.98;
+    // Plancher : on ne descend pas sous une échelle lisible ; au-delà, on navigue
+    // (molette/espace) plutôt que d'écraser le schéma en une bande minuscule.
+    st.scale = Math.max(Math.min(cw/sw, ch/sh, 1) * 0.98, 0.32);
     st.tx = Math.max(0,(cw - sw*st.scale)/2); st.ty = 8; apply(); };
   wrap.addEventListener("wheel", ev => { if(!host.querySelector("svg")) return; ev.preventDefault();
     const r = wrap.getBoundingClientRect(), mx = ev.clientX-r.left, my = ev.clientY-r.top;
@@ -673,6 +675,11 @@ function renderInteractions(graph){
   const layer={}; ids.forEach(id=>layer[id]=0);
   for(let it=0; it<ids.length; it++){ let ch=false;
     for(const e of edges){ if(layer[e.to] < layer[e.from]+1){ layer[e.to]=layer[e.from]+1; ch=true; } } if(!ch) break; }
+  // Bornage : des chaînes de trafic transitives peuvent créer des dizaines de
+  // couches → le schéma s'étale à l'infini et devient illisible. On plafonne le
+  // nombre de colonnes ; les nœuds plus profonds se replient dans la dernière.
+  const CAPL=5;
+  ids.forEach(id=>{ if(layer[id]>CAPL) layer[id]=CAPL; });
   const maxL=Math.max(0,...ids.map(id=>layer[id]));
   const cols=Array.from({length:maxL+1},()=>[]);
   for(const id of ids) cols[layer[id]].push(id);
@@ -695,8 +702,14 @@ function renderInteractions(graph){
   // constante ≈ hauteur du nœud. Chaque ruban relie le centre du nœud source au centre
   // du nœud cible → sa largeur colle au carré/rectangle d'où il part. Les liens d'un
   // même nœud se regroupent au nœud puis s'éventaillent vers leurs cibles.
-  const H0=17, TH=13, gap=22, nodeW=13, Mt=46, Mb=30, leftPad=150, rightPad=150, colW=210;
-  const W=Math.max(viewW(host), leftPad+rightPad+maxL*colW+nodeW+40);
+  const H0=17, TH=13, gap=15, nodeW=13, Mt=46, Mb=30, leftPad=150, rightPad=150;
+  // Colonnes resserrées et largeur calée sur le CONTENU (fit centre ensuite) :
+  // plus de vide à droite, plus de bande écrasée.
+  const vw=viewW(host);
+  let colW=185;
+  if(maxL>0 && (leftPad+rightPad+maxL*colW+nodeW+40) > vw*1.35)
+    colW=Math.max(120, (vw*1.35 - leftPad - rightPad - nodeW - 40)/maxL);
+  const W=leftPad+rightPad+maxL*colW+nodeW+40;
   const colX=l=> leftPad + colW*l;
   const colH=cols.map(c=>Math.max(0,c.length*(H0+gap)-gap));
   const maxColH=Math.max(H0,...colH);
@@ -725,6 +738,7 @@ function renderInteractions(graph){
   let defs=`<filter id="isoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`;
   let rib="", nodes="", labels="", gi=0;
   for(const e of edges){
+    if(layer[e.from]===layer[e.to]) continue; // chaîne repliée : pas de ruban intra-colonne
     const P=pos[e.from], Q=pos[e.to], c0=ribColor(e), op=ribOp(e), id="ig"+(gi++);
     defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">`+
       `<stop offset="0" stop-color="${c0}" stop-opacity="${op[0]}"/>`+
@@ -872,7 +886,8 @@ function computeNetworkFindings(graph){
   const top=id=>{let c=ownerOf[id],g=0;while(c&&g++<12){const k=byId[c]&&byId[c].kind;if(WKINDS.includes(k))return c;c=ownerOf[c];}return null;};
   const svcWl={}; for(const e of graph.edges) if(e.type==="SELECTS"){ const w=top(e.target); if(w&&!svcWl[e.source]) svcWl[e.source]=w; }
   const resolveWl=id=>{ const n=byId[id]; if(!n) return null; if(n.kind==="Service") return svcWl[id]||id; if(WKINDS.includes(n.kind)) return id; return top(id)||id; };
-  const out=[];
+  const nsPol=new Set(); for(const n of graph.nodes) if(n.kind==="NetworkPolicy") nsPol.add(n.namespace);
+  const out=[], flatSeen=new Set();
   for(const e of graph.edges){ if(e.type!=="TALKS_TO") continue;
     const from=resolveWl(e.source), to=resolveWl(e.target); if(!from||!to||from===to) continue;
     if((ingP.has(to)||egP.has(from)) && !allowed.has(from+"__"+to)){
@@ -880,6 +895,14 @@ function computeNetworkFindings(graph){
       out.push({ id:"net/"+from+"__"+to, severity:"high", category:"network", title:"Trafic non autorisé (dérive réseau)",
         why:"Connexion observée "+fn+" → "+tn+" non couverte par une NetworkPolicy sur une cible isolée : mouvement latéral possible.",
         ref:"CIS Kubernetes Benchmark §5.3 ; MITRE ATT&CK Containers T1210", node:from, peer:to });
+    }
+    // Namespace qui reçoit du trafic mais SANS aucune NetworkPolicy (réseau plat, une fois par ns).
+    const tn=byId[to]; const ns=tn?(tn.namespace||""):"";
+    if(tn && !nsPol.has(ns) && !flatSeen.has(ns)){
+      flatSeen.add(ns);
+      out.push({ id:"net/flat/"+ns, severity:"low", category:"network", title:"Namespace sans NetworkPolicy (réseau plat)",
+        why:"Le namespace « "+ns+" » reçoit du trafic mais n'a aucune NetworkPolicy : tout pod peut joindre tout pod, aucune segmentation.",
+        ref:"CIS Kubernetes Benchmark §5.3 ; NIST SP 800-190", node:to });
     }
   }
   return out;
@@ -941,14 +964,25 @@ function recoFor(f){
     if(t.includes("escalation")) return {reco:"Interdis l'escalade de privilèges.", yaml:`# securityContext\nallowPrivilegeEscalation: false`};
     if(t.includes("capability")) return {reco:"Drop toutes les capabilities, ajoute seulement celles strictement requises.", yaml:`# securityContext\ncapabilities:\n  drop: ["ALL"]\n  # add: ["NET_BIND_SERVICE"]  # si vraiment nécessaire`};
     if(t.includes("default")) return {reco:"Crée un ServiceAccount dédié et coupe le montage du token si l'app n'appelle pas l'API K8s.", yaml:`apiVersion: v1\nkind: ServiceAccount\nmetadata: { name: mon-app-sa, namespace: <ns> }\nautomountServiceAccountToken: false\n---\n# spec.template.spec\nserviceAccountName: mon-app-sa\nautomountServiceAccountToken: false`};
-    return {reco:"Durcis le securityContext du pod.", yaml:`securityContext:\n  runAsNonRoot: true\n  allowPrivilegeEscalation: false\n  capabilities: { drop: ["ALL"] }`};
+    if(t.includes("mutable")) return {reco:"Épingle l'image par <b>tag versionné</b> ou par <b>digest</b> (reproductible, traçable).", yaml:`# containers[]\nimage: mon-app:1.4.2\n# ou, encore mieux, par digest :\n# image: mon-app@sha256:...`};
+    if(t.includes("limites")) return {reco:"Déclare des <b>requests/limits</b> CPU et mémoire.", yaml:`# containers[].resources\nresources:\n  requests: { cpu: "100m", memory: "128Mi" }\n  limits:   { cpu: "500m", memory: "256Mi" }`};
+    if(t.includes("hostport")) return {reco:"Supprime le <b>hostPort</b> ; expose via un Service.", yaml:`# containers[].ports — retire hostPort\nports:\n  - containerPort: 8080\n    # hostPort: 8080   <-- à supprimer`};
+    if(t.includes("inscriptible")) return {reco:"Passe le filesystem racine en <b>lecture seule</b> (monte un emptyDir pour les écritures nécessaires).", yaml:`# containers[].securityContext\nsecurityContext:\n  readOnlyRootFilesystem: true`};
+    if(t.includes("seccomp")) return {reco:"Applique le profil <b>seccomp RuntimeDefault</b>.", yaml:`# spec.template.spec.securityContext\nsecurityContext:\n  seccompProfile:\n    type: RuntimeDefault`};
+    if(t.includes("shareprocessnamespace")) return {reco:"Désactive le partage d'espace de process entre conteneurs.", yaml:`# spec.template.spec\nshareProcessNamespace: false`};
+    return {reco:"Durcis le securityContext du pod.", yaml:`securityContext:\n  runAsNonRoot: true\n  allowPrivilegeEscalation: false\n  readOnlyRootFilesystem: true\n  capabilities: { drop: ["ALL"] }\n  seccompProfile: { type: RuntimeDefault }`};
   }
   if(c==="rbac") return {reco:"Remplace ce rôle large par un <b>Role au moindre privilège</b>, limité aux ressources/verbes réellement nécessaires, lié au SA de l'app.", yaml:`apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata: { name: mon-app-role, namespace: <ns> }\nrules:\n  - apiGroups: [""]\n    resources: ["configmaps"]\n    verbs: ["get","list","watch"]   # au strict nécessaire\n---\nkind: RoleBinding\napiVersion: rbac.authorization.k8s.io/v1\nmetadata: { name: mon-app-rb, namespace: <ns> }\nroleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: mon-app-role }\nsubjects:\n  - { kind: ServiceAccount, name: <sa>, namespace: <ns> }`};
   if(c==="exposure"){
+    if(t.includes("sans tls")) return {reco:"Ajoute une section <b>TLS</b> à l'Ingress (certificat via cert-manager par ex.).", yaml:`# ingress.spec\ntls:\n  - hosts: ["mon-app.example.com"]\n    secretName: mon-app-tls`};
+    if(t.includes("externalips")) return {reco:"Retire les <b>externalIPs</b> ; expose de façon contrôlée (Ingress + auth).", yaml:`# service.spec — retire externalIPs\nspec:\n  type: ClusterIP\n  # externalIPs: [...]   <-- à supprimer`};
     if(t.includes("ingress")) return {reco:"Ajoute une <b>authentification</b> sur l'Ingress, restreins l'accès (allow-list / WAF) et pose une NetworkPolicy sur le backend.", yaml:`# Ingress nginx — exemple basic-auth\nmetadata:\n  annotations:\n    nginx.ingress.kubernetes.io/auth-type: basic\n    nginx.ingress.kubernetes.io/auth-secret: mon-auth`};
     return {reco:"Repasse le service en <b>ClusterIP</b> et expose via un Ingress authentifié ; sinon restreins les sources.", yaml:`# service\nspec:\n  type: ClusterIP        # au lieu de LoadBalancer / NodePort\n# si exposition externe requise :\n#   loadBalancerSourceRanges: ["203.0.113.0/24"]`};
   }
-  if(c==="network") return {reco:"Déclare explicitement le flux légitime dans une <b>NetworkPolicy</b> (ou bloque-le), et adopte un default-deny par namespace.", yaml:`apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: { name: allow-src-to-dst, namespace: <ns-cible> }\nspec:\n  podSelector: { matchLabels: { app: <dst> } }\n  policyTypes: ["Ingress"]\n  ingress:\n    - from:\n        - podSelector: { matchLabels: { app: <src> } }`};
+  if(c==="network"){
+    if(t.includes("plat")) return {reco:"Pose un <b>default-deny</b> sur le namespace, puis autorise explicitement les flux légitimes.", yaml:`apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: { name: default-deny, namespace: <ns> }\nspec:\n  podSelector: {}          # tous les pods\n  policyTypes: ["Ingress","Egress"]`};
+    return {reco:"Déclare explicitement le flux légitime dans une <b>NetworkPolicy</b> (ou bloque-le), et adopte un default-deny par namespace.", yaml:`apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: { name: allow-src-to-dst, namespace: <ns-cible> }\nspec:\n  podSelector: { matchLabels: { app: <dst> } }\n  policyTypes: ["Ingress"]\n  ingress:\n    - from:\n        - podSelector: { matchLabels: { app: <src> } }`};
+  }
   return {reco:"", yaml:""};
 }
 let _secYaml={}, _yc=0;
