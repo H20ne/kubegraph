@@ -35,6 +35,7 @@ func (h *Handler) Mux() *http.ServeMux {
 	mux.HandleFunc("GET /nodes", h.nodes)
 	mux.HandleFunc("GET /graph", h.graph)
 	mux.HandleFunc("GET /ego", h.ego)
+	mux.HandleFunc("GET /findings", h.findings)
 	mux.HandleFunc("POST /flows", h.flows)
 	// Dashboard servi par le hub : "/" attrape tout ce qui n'est pas une route
 	// API ci-dessus. http.FileServer sert index.html pour "/" automatiquement.
@@ -137,6 +138,23 @@ func (h *Handler) graph(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
+// findings : GET /findings — les points d'attention sécurité (structurels).
+func (h *Handler) findings(w http.ResponseWriter, _ *http.Request) {
+	src := h.store.Findings()
+	out := make([]findingDTO, 0, len(src))
+	for _, f := range src {
+		d := findingDTO{
+			ID: f.ID, Severity: string(f.Severity), Category: f.Category,
+			Title: f.Title, Why: f.Why, Ref: f.Ref, Node: idStr(f.Node),
+		}
+		if f.Peer != nil {
+			d.Peer = idStr(*f.Peer)
+		}
+		out = append(out, d)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
 // ego : GET /ego?cluster=<id>&uid=<uid>&depth=<n>
 func (h *Handler) ego(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
@@ -206,6 +224,17 @@ type egoDTO struct {
 type graphDTO struct {
 	Nodes []listNodeDTO `json:"nodes"`
 	Edges []edgeDTO     `json:"edges"`
+}
+
+type findingDTO struct {
+	ID       string `json:"id"`
+	Severity string `json:"severity"`
+	Category string `json:"category"`
+	Title    string `json:"title"`
+	Why      string `json:"why"`
+	Ref      string `json:"ref"`
+	Node     string `json:"node"`
+	Peer     string `json:"peer,omitempty"`
 }
 
 // idStr fabrique un identifiant string stable pour le frontend.

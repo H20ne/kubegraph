@@ -93,3 +93,28 @@ type Edge struct {
 	To   NodeID
 	Type EdgeType
 }
+
+// Severity classe la gravité d'un point d'attention sécurité. Ordre croissant.
+type Severity string
+
+const (
+	SevInfo     Severity = "info"
+	SevLow      Severity = "low"
+	SevMedium   Severity = "medium"
+	SevHigh     Severity = "high"
+	SevCritical Severity = "critical"
+)
+
+// Finding est un POINT D'ATTENTION sécurité (pas un correctif) : il informe et
+// prévient. Il pointe un nœud (et parfois une relation Node->Peer) et cite sa
+// source (CIS/NIST/MITRE). La gravité pilote le dégradé jaune→orange→rouge.
+type Finding struct {
+	ID       string   // identifiant stable (catégorie + cible)
+	Severity Severity //
+	Category string   // rbac | pod | exposure | network
+	Title    string   // libellé court
+	Why      string   // le RISQUE, expliqué (pourquoi c'est un point d'attention)
+	Ref      string   // référence (standard) vérifiable
+	Node     NodeID   // nœud principal concerné
+	Peer     *NodeID  // si présent : la relation Node->Peer est concernée
+}

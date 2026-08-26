@@ -60,6 +60,23 @@ func main() {
 	st := store.New()
 	st.Load(nodes, edges)
 
+	// Points d'attention sécurité (structurels).
+	findings := src.Findings()
+	st.SetFindings(findings)
+	if len(findings) > 0 {
+		sevCount := map[string]int{}
+		for _, f := range findings {
+			sevCount[string(f.Severity)]++
+		}
+		fmt.Printf("sécurité : %d point(s) d'attention", len(findings))
+		for _, s := range []string{"critical", "high", "medium", "low"} {
+			if sevCount[s] > 0 {
+				fmt.Printf(" · %d %s", sevCount[s], s)
+			}
+		}
+		fmt.Println()
+	}
+
 	// Agent embarqué : lit conntrack et pousse les flux observés dans le store.
 	if agentMode {
 		go runEmbeddedAgent(st)

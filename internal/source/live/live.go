@@ -27,7 +27,11 @@ type Source struct {
 	clusterID string
 	client    kubernetes.Interface
 	dyn       dynamic.Interface // pour les CRD (KEDA…) ; peut être nil
+	findings  []graph.Finding   // points d'attention sécurité, calculés à Collect
 }
+
+// Findings retourne les points d'attention sécurité du dernier Collect.
+func (s *Source) Findings() []graph.Finding { return s.findings }
 
 // New construit une Source live à partir d'un kubeconfig.
 //   - kubeconfigPath vide => règles de chargement par défaut (env KUBECONFIG,
@@ -187,6 +191,9 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 	an, ae := s.collectAccess(ctx, pods.Items, topWL)
 	nodes = append(nodes, an...)
 	edges = append(edges, ae...)
+
+	// Points d'attention sécurité (structurels) : pod / rbac / exposition.
+	s.findings = s.computeFindings(ctx, pods.Items, services.Items, ingresses.Items, topWL)
 
 	return nodes, edges, nil
 }

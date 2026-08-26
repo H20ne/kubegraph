@@ -61,22 +61,48 @@
   .tabs button.active::after { content:""; position:absolute; left:12px; right:12px; bottom:3px;
     height:2px; border-radius:2px; background:linear-gradient(90deg,#5fb3c9,#8fe0f0);
     box-shadow:0 0 8px 1px rgba(95,179,201,.55); }
-  #flow-controls, #explorer-controls, #int-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
+  #flow-controls, #explorer-controls, #int-controls, #sec-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
   body[data-mode="flow"] #flow-controls { display:flex; }
   body[data-mode="explore"] #explorer-controls { display:flex; }
   body[data-mode="interactions"] #int-controls { display:inline-flex; }
+  body[data-mode="flow"] #sec-controls, body[data-mode="interactions"] #sec-controls, body[data-mode="access"] #sec-controls { display:inline-flex; }
+  /* Interrupteur mode sécu : plus visible quand actif. */
+  #sec-mode:checked + .lbl, .switch:has(#sec-mode:checked) { color:#e0883a; font-weight:700; }
   .switch { font-size:12px; color:var(--muted); text-transform:none; letter-spacing:0; font-weight:500; }
   .hint { font-size:12px; color:var(--muted); padding:8px 16px 0; }
   .stage { flex:1; min-height:0; position:relative; display:flex; }
-  #flow-wrap, #sankey-wrap, #access-wrap { flex:1; min-height:0; overflow:auto; display:none; }
-  #flow-wrap, #sankey-wrap, #access-wrap { background:#08090c; padding:14px 18px; }
-  /* Schémas responsive : jamais plus large que le conteneur (pas de débordement). */
-  #flow svg, #cyint svg, #sankey svg, #access svg { max-width:100%; height:auto; display:block; }
+  /* Viewports pan/zoom : le schéma tient dans la fenêtre, molette=zoom, espace+glisser=déplacer. */
+  #flow-wrap, #sankey-wrap, #access-wrap, #int-wrap {
+    flex:1; min-height:0; display:none; position:relative; overflow:hidden; background:#08090c; }
+  /* Pas de will-change/layer GPU : sinon le SVG est rasterisé à 1x puis agrandi (flou).
+     Sans promotion, le navigateur re-rend le vectoriel à chaque échelle → net au zoom. */
+  #flow, #sankey, #access, #cyint { position:absolute; top:0; left:0; transform-origin:0 0; }
+  #flow svg, #cyint svg, #sankey svg, #access svg { display:block; }
   body[data-mode="flow"] #flow-wrap { display:block; }
   body[data-mode="overview"] #sankey-wrap { display:block; }
   body[data-mode="access"] #access-wrap { display:block; }
-  #int-wrap { flex:1; min-height:0; display:none; position:relative; overflow:auto; background:#08090c; padding:14px 18px; }
   body[data-mode="interactions"] #int-wrap { display:block; }
+  /* Onglet Sécurité : rapport défilable (pas de pan/zoom). */
+  #sec-wrap { flex:1; min-height:0; overflow:auto; display:none; background:#0b0e13; padding:16px 20px 40px; }
+  body[data-mode="security"] #sec-wrap { display:block; }
+  .sec-sum { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px; }
+  .sec-pill { display:inline-flex; align-items:center; gap:7px; padding:7px 12px; border-radius:10px;
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); font-size:13px; font-weight:600; }
+  .sec-pill b { font-size:15px; }
+  .sec-grp { font-size:11px; font-weight:700; letter-spacing:.6px; text-transform:uppercase; color:#8ea2c0; margin:20px 0 8px; }
+  .sec-card { display:grid; grid-template-columns:5px 1fr auto; gap:0 14px; align-items:start;
+    background:rgba(255,255,255,.025); border:1px solid rgba(255,255,255,.07); border-radius:10px; padding:11px 14px 12px; margin-bottom:8px; overflow:hidden; }
+  .sec-bar { grid-row:1/3; width:5px; margin:-11px 0 -12px -14px; border-radius:10px 0 0 10px; }
+  .sec-card h4 { margin:0 0 3px; font-size:13.5px; font-weight:700; color:#e9edf3; }
+  .sec-card .why { font-size:12.5px; color:#aeb8c6; line-height:1.5; }
+  .sec-card .meta { font-size:11.5px; color:#7b8798; margin-top:5px; }
+  .sec-card .ref { font-size:11px; color:#6b7688; }
+  .sev-tag { align-self:start; font-size:10.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
+    padding:3px 8px; border-radius:20px; color:#08090c; white-space:nowrap; }
+  #sec-empty { color:var(--muted); font-size:13px; padding:24px 4px; }
+  .pzhint { position:absolute; right:12px; bottom:10px; z-index:6; font-size:11px; color:#5b6472;
+    background:rgba(8,9,12,.7); border:1px solid rgba(255,255,255,.06); border-radius:7px; padding:4px 9px; pointer-events:none; }
+  body.panning #flow-wrap, body.panning #int-wrap, body.panning #access-wrap, body.panning #sankey-wrap { cursor:grab; }
   #cyint { width:100%; }
   #int-empty { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--muted); font-size:13px; padding:0 40px; display:none; }
   #explore-wrap { flex:1; min-height:0; display:none; }
@@ -108,6 +134,7 @@
       <button id="tab-flow">Exécution</button>
       <button id="tab-interactions" class="active">Réseau &amp; interactions</button>
       <button id="tab-access">Accès &amp; identité</button>
+      <button id="tab-security">Sécurité</button>
       <button id="tab-overview">Vue d'ensemble</button>
       <button id="tab-explore">Explorer</button>
     </div>
@@ -118,6 +145,9 @@
     </span>
     <span id="int-controls">
       <label class="switch"><input type="checkbox" id="hide-infra" checked> masquer l'infra</label>
+    </span>
+    <span id="sec-controls">
+      <label class="switch"><input type="checkbox" id="sec-mode"> mode sécu</label>
     </span>
     <span id="explorer-controls">
       <label>départ <select id="picker"><option value="">—</option></select></label>
@@ -131,10 +161,11 @@
   <div class="hint" id="hint"></div>
 
   <div class="stage">
-    <div id="flow-wrap"><div id="flow"></div></div>
-    <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div></div>
-    <div id="access-wrap"><div id="access"></div></div>
-    <div id="sankey-wrap"><div id="sankey"></div></div>
+    <div id="flow-wrap"><div id="flow"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="access-wrap"><div id="access"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="sec-wrap"><div id="sec"></div></div>
+    <div id="sankey-wrap"><div id="sankey"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="explore-wrap">
       <div id="cy"></div>
       <div class="zoombar">
@@ -205,204 +236,187 @@ function renderFlow(graph, ns) {
   const ALL = ns === ALL_NS;
   const inNs = n => ALL || (n.namespace || "—") === ns;
 
-  // Liens de chaîne = arêtes inversées (owner→child, pod→service, service→ingress),
-  // uniquement entre colonnes adjacentes et dans le namespace choisi.
-  // Contrôleur de tête d'un objet (on collapse le ReplicaSet).
+  // Colonnes = RÔLES ; plusieurs types EMPILÉS par colonne, et une colonne
+  // n'apparaît que si elle a du contenu (les colonnes vides sont masquées).
+  const COLDEFS = [
+    { key:"deps", head:"DÉPENDANCES", kinds:["PersistentVolumeClaim","Secret","ConfigMap"] },
+    { key:"wl",   head:"WORKLOAD",    kinds:WKINDS },
+    { key:"pod",  head:"POD",         kinds:["Pod"] },
+    { key:"svc",  head:"SERVICE",     kinds:["Service"] },
+    { key:"ing",  head:"INGRESS",     kinds:["Ingress"] },
+  ];
+  const WLc = 1;
+  const kindCol = k => COLDEFS.findIndex(c => c.kinds.includes(k));
+
   const ownerOf = {};
   for (const e of graph.edges) if (e.type === "OWNED_BY") ownerOf[e.source] = e.target;
   const topWorkload = id => { let cur = ownerOf[id], g = 0;
     while (cur && g++ < 12) { const k = byId[cur] && byId[cur].kind; if (WKINDS.includes(k)) return cur; cur = ownerOf[cur]; }
     return null; };
 
+  // Liens gauche→droite entre rôles.
   const links = [];
-  // Workload -> Pod (en remontant jusqu'au contrôleur de tête : Deployment via
-  // son RS, ou StatefulSet / DaemonSet directement).
-  for (const n of graph.nodes) {
-    if (n.kind !== "Pod" || !inNs(n)) continue;
-    const w = topWorkload(n.id);
-    if (w && byId[w] && inNs(byId[w])) links.push({ s: w, t: n.id });
-  }
-  // Pod -> Service (SELECTS inversé) et Service -> Ingress (ROUTES_TO inversé).
-  // On n'accepte QUE des liens entre types de colonnes du flux (Workload/Pod/
-  // Service/Ingress) : une arête SELECTS d'un PDB (hors colonnes) est ignorée ici.
+  const push = (s,t) => { if (byId[s] && byId[t] && inNs(byId[s]) && inNs(byId[t])) links.push({ s, t }); };
+  // Dépendances → Workload : PVC (USES wl→pvc) et Secret (REFERENCES wl→secret).
   for (const e of graph.edges) {
-    if (e.type !== "SELECTS" && e.type !== "ROUTES_TO") continue;
-    const s = byId[e.target], t = byId[e.source];
-    if (!s || !t || !inNs(s) || !inNs(t)) continue;
-    if (colOf(s.kind) < 0 || colOf(t.kind) < 0) continue;
-    links.push({ s: e.target, t: e.source });
+    if (e.type === "USES" && byId[e.target] && byId[e.target].kind === "PersistentVolumeClaim") push(e.target, e.source);
+    else if (e.type === "REFERENCES" && byId[e.target] && byId[e.target].kind === "Secret") push(e.target, e.source);
+  }
+  // Workload → Pod (contrôleur de tête).
+  for (const n of graph.nodes) { if (n.kind !== "Pod" || !inNs(n)) continue;
+    const w = topWorkload(n.id); if (w && byId[w] && inNs(byId[w])) push(w, n.id); }
+  // Pod → Service (SELECTS inversé) ; Service → Ingress (ROUTES_TO inversé).
+  for (const e of graph.edges) {
+    if (e.type === "SELECTS") { const pod = byId[e.target], svc = byId[e.source];
+      if (pod && svc && kindCol(pod.kind) === 2 && kindCol(svc.kind) === 3) push(e.target, e.source); }
+    else if (e.type === "ROUTES_TO") { const svc = byId[e.target], ing = byId[e.source];
+      if (svc && ing && kindCol(svc.kind) === 3 && kindCol(ing.kind) === 4) push(e.target, e.source); }
   }
   const out = {}, inc = {};
-  for (const l of links) { (out[l.s] = out[l.s]||[]).push(l.t); (inc[l.t] = inc[l.t]||[]).push(l.s); }
+  for (const l of links) { (out[l.s]=out[l.s]||[]).push(l.t); (inc[l.t]=inc[l.t]||[]).push(l.s); }
 
-  // Nœuds par colonne : Workload / Pod / Service / Ingress.
-  const col = [[],[],[],[]];
-  for (const n of graph.nodes) { if (!inNs(n)) continue; const c = colOf(n.kind); if (c >= 0) col[c].push(n); }
+  // Nœuds par colonne (rôle).
+  const col = COLDEFS.map(()=>[]);
+  for (const n of graph.nodes) { if (!inNs(n)) continue; const c = kindCol(n.kind); if (c >= 0) col[c].push(n); }
 
-  // Valeur en pods.
+  // #pods par nœud (épaisseur + états).
   const pv = {};
-  for (const n of col[1]) pv[n.id] = 1;                                              // Pod
-  for (const n of col[0]) pv[n.id] = (out[n.id]||[]).length;                         // Workload -> #pods
-  for (const n of col[2]) pv[n.id] = (inc[n.id]||[]).length;                         // Service -> #pods
-  for (const n of col[3]) pv[n.id] = (inc[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0);// Ingress
-  const flinks = links;
+  for (const n of col[2]) pv[n.id] = 1;
+  for (const n of col[WLc]) pv[n.id] = (out[n.id]||[]).filter(id=>byId[id]&&byId[id].kind==="Pod").length;
+  for (const n of col[3]) pv[n.id] = (inc[n.id]||[]).length;
+  for (const n of col[4]) pv[n.id] = (inc[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0);
 
-  // Retirer les nœuds ISOLÉS (aucun ruban) : pods orphelins, services fantômes.
-  // On garde quand même les workloads (un workload à 0 pod est un signal) et les
-  // services/ingress "cassés" (0 pod / 0 flux), eux aussi porteurs d'info.
-  const connected = new Set(); for (const l of flinks) { connected.add(l.s); connected.add(l.t); }
   const badFlag = n => { const v = pv[n.id]||0;
     if (n.kind === "Service") return v === 0 && !n.noSelector;
     if (n.kind === "Ingress") return v === 0; return false; };
-  col[1] = col[1].filter(n => connected.has(n.id));
-  col[2] = col[2].filter(n => connected.has(n.id) || badFlag(n));
+  const connected = new Set(); for (const l of links) { connected.add(l.s); connected.add(l.t); }
+  col[0] = col[0].filter(n => connected.has(n.id));
+  col[1] = col[1].filter(n => connected.has(n.id) || (pv[n.id]||0)===0); // garde workloads idle (signal)
+  col[2] = col[2].filter(n => connected.has(n.id));
   col[3] = col[3].filter(n => connected.has(n.id) || badFlag(n));
+  col[4] = col[4].filter(n => connected.has(n.id) || badFlag(n));
 
-  if (col.every(c => c.length === 0)) { host.innerHTML = "<p style='color:var(--muted);padding:24px'>Rien à afficher dans ce namespace.</p>"; return; }
+  const active = COLDEFS.map((_,i)=>i).filter(i=>col[i].length>0);
+  if (!active.length) { host.innerHTML = "<p style='color:var(--muted);padding:24px'>Rien à afficher dans ce namespace.</p>"; setStatus("vide"); return; }
 
-  // Workloads GROUPÉS par namespace (couloirs), puis triés par nom dans chaque groupe.
-  col[0].sort((a,b)=> (a.namespace||"").localeCompare(b.namespace||"") || a.name.localeCompare(b.name));
-  // Puis barycentre pour les colonnes suivantes (réduit les croisements).
-  for (let c = 1; c < 4; c++) {
-    const idx = {}; col[c-1].forEach((n,i)=>idx[n.id]=i);
-    col[c].forEach(n => { const src=(inc[n.id]||[]).filter(id=>idx[id]!==undefined);
-      n._b = src.length ? src.reduce((a,id)=>a+idx[id],0)/src.length : 1e9; });
-    col[c].sort((a,b)=>(a._b-b._b)||a.name.localeCompare(b.name));
-  }
+  // Tri : workloads groupés par namespace ; autres colonnes par barycentre.
+  col[WLc].sort((a,b)=> (a.namespace||"").localeCompare(b.namespace||"") || a.name.localeCompare(b.name));
+  const orderBy = (c, ref, adj) => { const idx={}; col[ref].forEach((n,i)=>idx[n.id]=i);
+    col[c].forEach(n=>{ const src=(adj[n.id]||[]).filter(id=>idx[id]!==undefined); n._b=src.length?src.reduce((a,id)=>a+idx[id],0)/src.length:1e9; });
+    col[c].sort((a,b)=>(a._b-b._b)||a.name.localeCompare(b.name)); };
+  if (col[2].length) orderBy(2, 1, inc);
+  if (col[3].length) orderBy(3, 2, inc);
+  if (col[4].length) orderBy(4, 3, inc);
+  if (col[0].length) orderBy(0, 1, out); // deps triées par leur workload cible
 
-  // ---- Rendu premium (Workload → Pod → Service → Ingress) ----
-  const KCOL=k=> k==="Ingress" ? "#5b9bff"
-    : k==="Service" ? "#6b7688"
-    : k==="Pod" ? "#5fb3c9"
-    : k==="StatefulSet" ? "#8b5cf6"
+  // ---- Rendu premium (colonnes dynamiques) ----
+  const KCOL=k=> k==="Ingress" ? "#5b9bff" : k==="Service" ? "#6b7688" : k==="Pod" ? "#5fb3c9"
+    : k==="StatefulSet" ? "#8b5cf6" : k==="PersistentVolumeClaim" ? "#d0a15e" : k==="Secret" ? "#d98a5b" : k==="ConfigMap" ? "#bc8cff"
     : WKINDS.includes(k) ? "oklch(0.88 0.22 178.95)" : "#6b7688";
-  // scale = px par pod ; minH ≤ scale pour que la hauteur du nœud = l'épaisseur
-  // exacte de ses rubans (le carré/rectangle a la largeur du flux qui en part).
   const scale = 12, minH = 8, gap = 13, headY = 24, nsGap = 26;
-  const W = Math.max(host.clientWidth || 1200, 1040);
+  const W = Math.max(viewW(host), 1040);
   const leftPad = 250, rightPad = 210, nodeW = 12, Mt = 46, Mb = 26;
-  const colX = i => leftPad + ((W - leftPad - rightPad) / 3) * i;
+  const slot = {}; active.forEach((ci,i)=>slot[ci]=i);
+  const denom = Math.max(1, active.length-1);
+  const colX = ci => leftPad + ((W - leftPad - rightPad) / denom) * slot[ci];
 
-  const inSum = {}, outSum = {};
-  for (const l of flinks) {
-    const sk = byId[l.s].kind;
-    l.val = colOf(sk) === 0 ? (pv[l.t] || 1) : sk === "Service" ? (pv[l.s] || 1) : 1;
-    outSum[l.s] = (outSum[l.s] || 0) + l.val; inSum[l.t] = (inSum[l.t] || 0) + l.val;
-  }
+  const inSum={}, outSum={};
+  for (const l of links) { l.val = 1; outSum[l.s]=(outSum[l.s]||0)+1; inSum[l.t]=(inSum[l.t]||0)+1; }
   const H = {};
-  for (let c = 0; c < 4; c++) for (const n of col[c]) H[n.id] = Math.max(minH, (inSum[n.id]||0)*scale, (outSum[n.id]||0)*scale);
-  // Hauteur colonne 0 = somme des nœuds + un espace supplémentaire à chaque changement de namespace.
+  for (const ci of active) for (const n of col[ci]) H[n.id] = Math.max(minH, (inSum[n.id]||0)*scale, (outSum[n.id]||0)*scale);
+
   const nsOf = n => n.namespace || "—";
-  let tot0 = 0, prev0 = null;
-  for (const n of col[0]) { if (prev0 !== null && nsOf(n) !== prev0) tot0 += nsGap; tot0 += H[n.id] + gap; prev0 = nsOf(n); }
-  tot0 = Math.max(0, tot0 - gap);
-  const colTot = [tot0];
-  for (let c = 1; c < 4; c++) { let t = 0; for (const n of col[c]) t += H[n.id] + gap; colTot[c] = Math.max(0, t - gap); }
-  const maxTot = Math.max(1, ...colTot);
-  const pos = {};
-  // Colonne 0 : positions groupées par namespace + repères de groupe (nom + séparateur).
-  const nsBands = [];
-  { let y = Mt + (maxTot - colTot[0]) / 2, prev = null, gTop = 0, gNs = null;
-    const flush = yEnd => { if (gNs !== null) nsBands.push({ ns: gNs, y0: gTop, y1: yEnd }); };
-    for (const n of col[0]) { const ns = nsOf(n);
-      if (prev !== null && ns !== prev) { flush(y - gap); y += nsGap; }
-      if (ns !== prev) { gTop = y; gNs = ns; }
-      pos[n.id] = { x: colX(0), y, h: H[n.id], col: 0 }; y += H[n.id] + gap; prev = ns;
-    }
-    flush(y - gap);
+  const colTot = {};
+  for (const ci of active) {
+    if (ci===WLc) { let t=0, prev=null; for (const n of col[ci]) { if (prev!==null && nsOf(n)!==prev) t+=nsGap; t+=H[n.id]+gap; prev=nsOf(n); } colTot[ci]=Math.max(0,t-gap); }
+    else { let t=0; for (const n of col[ci]) t+=H[n.id]+gap; colTot[ci]=Math.max(0,t-gap); }
   }
-  for (let c = 1; c < 4; c++) { let y = Mt + (maxTot - colTot[c]) / 2; for (const n of col[c]) { pos[n.id] = { x: colX(c), y, h: H[n.id], col: c }; y += H[n.id] + gap; } }
+  const maxTot = Math.max(1, ...active.map(ci=>colTot[ci]));
+  const pos = {}; const nsBands = [];
+  for (const ci of active) {
+    if (ci===WLc) { let y=Mt+(maxTot-colTot[ci])/2, prev=null, gTop=0, gNs=null;
+      const flush = yEnd => { if (gNs!==null) nsBands.push({ns:gNs,y0:gTop,y1:yEnd}); };
+      for (const n of col[ci]) { const nn=nsOf(n);
+        if (prev!==null && nn!==prev) { flush(y-gap); y+=nsGap; }
+        if (nn!==prev) { gTop=y; gNs=nn; }
+        pos[n.id]={x:colX(ci),y,h:H[n.id],col:ci}; y+=H[n.id]+gap; prev=nn; }
+      flush(y-gap);
+    } else { let y=Mt+(maxTot-colTot[ci])/2; for (const n of col[ci]) { pos[n.id]={x:colX(ci),y,h:H[n.id],col:ci}; y+=H[n.id]+gap; } }
+  }
 
-  // Chaque côté d'un nœud est REMPLI par ses rubans (proportion de val). Un ruban a
-  // donc une largeur à sa source (remplit le nœud source) et une largeur à sa cible
-  // (remplit le nœud cible) : il colle au carré/rectangle aux DEUX bouts, même quand
-  // entrées et sorties ne s'équilibrent pas.
-  const outL = {}, inL = {};
-  for (const l of flinks) { (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l); }
-  const allocFill = (map, sortKey, pre) => {
-    for (const id in map) { const arr = map[id], p = pos[id];
-      arr.sort((a,b)=>pos[a[sortKey]].y - pos[b[sortKey]].y);
-      const sum = arr.reduce((s,l)=>s+l.val,0) || 1; let off = p.y;
-      for (const l of arr) { const th = p.h * l.val / sum; l[pre+"y"]=off; l[pre+"th"]=th; off+=th; }
-    }
-  };
-  allocFill(outL, "t", "s"); allocFill(inL, "s", "t");
+  const outL={}, inL={};
+  for (const l of links) { (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l); }
+  const allocFill=(map,key,pre)=>{ for (const id in map){ const arr=map[id],p=pos[id]; if(!p) continue;
+    arr.sort((a,b)=>((pos[a[key]]||{}).y||0)-((pos[b[key]]||{}).y||0));
+    const sum=arr.reduce((s,l)=>s+l.val,0)||1; let off=p.y; for (const l of arr){ const th=p.h*l.val/sum; l[pre+"y"]=off; l[pre+"th"]=th; off+=th; } } };
+  allocFill(outL,"t","s"); allocFill(inL,"s","t");
 
-  const isBad = n => { const v = pv[n.id]||0;
-    if (n.kind === "Service") return v === 0 && !n.noSelector;
-    if (n.kind === "Ingress") return v === 0; return false; };
-  const isIdle = n => colOf(n.kind) === 0 && (pv[n.id]||0) === 0;
+  const isBad = badFlag;
+  const isIdle = n => WKINDS.includes(n.kind) && (pv[n.id]||0)===0;
 
   const svgH = Mt + maxTot + Mb;
   const DIP="#202634", END="#66707f";
-  // ruban à largeur variable : ths à la source, tht à la cible.
   const band=(x0,ys,ths,x1,yt,tht)=>{ const c=(x0+x1)/2;
     return `M${x0},${ys} C${c},${ys} ${c},${yt} ${x1},${yt} L${x1},${yt+tht} C${c},${yt+tht} ${c},${ys+ths} ${x0},${ys+ths} Z`; };
-  const isSrc = id => !(inL[id] && inL[id].length);
 
   let defs=`<filter id="fsoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`;
-  // Ombre portée douce et diffuse (pods + services).
   defs+=`<filter id="fsh" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="3.6"/></filter>`;
-  // Dégradé de lumière au DÉBUT de chaque flux (à la source), qui s'éteint vite.
   defs+=`<linearGradient id="flxstart" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#eafcff" stop-opacity=".26"/><stop offset=".09" stop-color="#eafcff" stop-opacity="0"/></linearGradient>`;
   let rib="", nodes="", labels="", gi=0;
-  for (const l of flinks) { const P=pos[l.s], Q=pos[l.t], c0=KCOL(byId[l.s].kind), id="fg"+(gi++);
-    defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">`+
-      `<stop offset="0" stop-color="${c0}" stop-opacity=".8"/>`+
-      `<stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/>`+
-      `<stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
-    const d=band(P.x+nodeW-1, l.sy, l.sth, Q.x+2, l.ty, l.tth);
+  for (const l of links) { const P=pos[l.s], Q=pos[l.t]; if(!P||!Q||l.sy==null||l.ty==null) continue;
+    const c0=secEdgeCol(l.s,l.t,KCOL(byId[l.s].kind)), id="fg"+(gi++);
+    defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${c0}" stop-opacity=".8"/><stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/><stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
+    // On glisse le raccord SOUS le nœud (au-delà du rayon des coins arrondis) :
+    // le nœud opaque recouvre l'extrémité, plus de coin noir à la jonction.
+    const d=band(P.x+nodeW-3.5, l.sy, l.sth, Q.x+3.5, l.ty, l.tth);
     rib+=`<path d="${d}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
-    // Voile de lumière superposé, uniquement à l'amorce du flux.
     rib+=`<path d="${d}" fill="url(#flxstart)"/>`;
   }
-  // Workload source « éclairé » : corps en dégradé tube + liseré coloré diffus + reflet blanc.
-  const litNode = (p, cap, ttl, rx) => {
-    const gid="fsrc"+(gi++);
+  const litNode=(p,cap,ttl,rx)=>{ const gid="fsrc"+(gi++);
     defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
     return `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="${rx}" fill="url(#${gid})" stroke="rgba(255,255,255,.1)">${ttl}</rect>`
       +`<rect x="${p.x+nodeW-2.5}" y="${p.y}" width="2.5" height="${p.h}" rx="1.5" fill="${cap}" filter="url(#fsoft)"/>`
-      +`<rect x="${p.x+nodeW-1.5}" y="${p.y+1}" width="1.5" height="${Math.max(0,p.h-2)}" fill="#eef3fb"/>`;
-  };
-  for (let c = 0; c < 4; c++) for (const n of col[c]) {
-    const p = pos[n.id], v = pv[n.id]||0, bad = isBad(n), idle = isIdle(n);
-    const cap = bad ? "#ef4444" : idle ? "#e0a94a" : KCOL(n.kind);
+      +`<rect x="${p.x+nodeW-1.5}" y="${p.y+1}" width="1.5" height="${Math.max(0,p.h-2)}" fill="#eef3fb"/>`; };
+  for (const ci of active) for (const n of col[ci]) {
+    const p = pos[n.id], v = pv[n.id]||0, bad = isBad(n), idle = isIdle(n), isWL = ci===WLc;
+    const cap = secNodeCol(n.id, bad ? "#ef4444" : idle ? "#e0a94a" : KCOL(n.kind));
     const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
-    const ttl = `<title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}${extra}</title>`;
-    if (!bad && !idle && isSrc(n.id) && c===0) {
-      nodes+=litNode(p, cap, ttl, 4);
+    const ttl = `<title>${esc(n.kind)}/${esc(n.name)}${isWL?` — ${v} pod${v>1?"s":""}`:""}${extra}</title>`;
+    if (isWL && !bad && !idle && !secMode) {
+      nodes+=litNode(p, cap, ttl, 4); // workload : tube éclairé (couleur du kind), sauf en mode sécu
     } else {
-      // Carré plein, net (le pod compris) — l'effet de lumière est porté par les FLUX.
       const glow = bad ? ' filter="url(#fsoft)"' : '';
-      // Pod & Service : ombre portée très légère et diffuse à droite (profondeur).
-      if ((c===1||c===2) && !bad) nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#fsh)"/>`;
+      if ((n.kind==="Pod"||n.kind==="Service") && !bad) nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#fsh)"/>`;
       nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}"${glow}>${ttl}</rect>`;
     }
     const tag = bad ? " ⚠" : idle ? " ·0" : "";
-    const nsSuffix = ALL ? " · " + esc(n.namespace || "") : "";
-    const kindTag = c===0 && n.kind!=="Deployment" ? ` [${esc(n.kind)}]` : "";
-    // col 0 : le namespace est porté par l'en-tête de groupe → pas de suffixe ici.
-    if (c === 0) labels+=`<text x="${p.x-9}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="12" font-weight="600" fill="${idle?'#e0a94a':bad?'#ef4444':'#e9edf3'}">${esc(n.name)}${kindTag}${tag}</text>`;
-    else if (c === 2 || c === 3) labels+=`<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" font-size="11.5" font-weight="500" fill="${bad?'#ef4444':'#e9edf3'}" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${nsSuffix}${tag}</text>`;
+    const nsSuffix = (ALL && !isWL) ? " · " + esc(n.namespace||"") : "";
+    const kindTag = isWL && n.kind!=="Deployment" ? ` [${esc(n.kind)}]` : "";
+    const side = (ci<=WLc) ? "L" : (ci>=3 ? "R" : null); // deps+workload à gauche, svc+ingress à droite, pods sans texte
+    if (side==="L") labels+=`<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="${isWL?12:11}" font-weight="${isWL?600:500}" fill="${idle?'#e0a94a':bad?'#ef4444':'#e9edf3'}" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${nsSuffix}${kindTag}${tag}</text>`;
+    else if (side==="R") labels+=`<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" font-size="11.5" font-weight="500" fill="${bad?'#ef4444':'#e9edf3'}" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${nsSuffix}${tag}</text>`;
   }
-  // En-têtes de namespace (couloirs) au-dessus de chaque groupe de workloads.
+  // En-têtes de namespace au-dessus des groupes de workloads.
   let nsHdr="";
+  const wlX = col[WLc].length ? colX(WLc) : leftPad;
   for (const bnd of nsBands) {
-    nsHdr += `<line x1="6" y1="${(bnd.y0-5).toFixed(1)}" x2="${leftPad+nodeW}" y2="${(bnd.y0-5).toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
-    nsHdr += `<text x="${leftPad-9}" y="${(bnd.y0-9).toFixed(1)}" text-anchor="end" font-size="10.5" font-weight="700" letter-spacing="0.5" fill="#8ea2c0">${esc(bnd.ns).toUpperCase()}</text>`;
+    nsHdr += `<line x1="6" y1="${(bnd.y0-5).toFixed(1)}" x2="${(wlX+nodeW).toFixed(1)}" y2="${(bnd.y0-5).toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
+    nsHdr += `<text x="${(wlX-9).toFixed(1)}" y="${(bnd.y0-9).toFixed(1)}" text-anchor="end" font-size="10.5" font-weight="700" letter-spacing="0.5" fill="#8ea2c0">${esc(bnd.ns).toUpperCase()}</text>`;
   }
   let s = `<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
   s+=`<defs>${defs}</defs>`;
-  for (let c = 0; c < 4; c++) s += `<text x="${colX(c)+nodeW/2}" y="${headY}" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${COLS[c].toUpperCase()}</text>`;
+  for (const ci of active) s += `<text x="${(colX(ci)+nodeW/2).toFixed(0)}" y="${headY}" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${COLDEFS[ci].head}</text>`;
   s += nsHdr+rib+nodes+labels+`</svg>`;
-  host.innerHTML = s;
+  host.innerHTML = s; fitHost(host);
 
   // Résumé.
-  const ing = col[3]; const okIng = ing.filter(n=>(pv[n.id]||0)>0).length;
-  const badSvc = col[2].filter(isBad).length;
-  const idleWl = col[0].filter(isIdle).length;
-  let msg = `${ALL ? "tout le cluster" : ns} · ${col[0].length} workloads, ${col[1].length} pods`;
-  if (ing.length) msg += ` · ingress ${okIng}/${ing.length} fonctionnels`;
+  const ingCol = col[4]; const okIng = ingCol.filter(n=>(pv[n.id]||0)>0).length;
+  const badSvc = col[3].filter(isBad).length;
+  const idleWl = col[WLc].filter(isIdle).length;
+  const nDeps = col[0].length;
+  let msg = `${ALL ? "tout le cluster" : ns} · ${col[WLc].length} workloads, ${col[2].length} pods`;
+  if (nDeps) msg += ` · ${nDeps} dépendance(s)`;
+  if (ingCol.length) msg += ` · ingress ${okIng}/${ingCol.length} fonctionnels`;
   if (badSvc) msg += ` · ${badSvc} service(s) cassé(s)`;
   if (idleWl) msg += ` · ${idleWl} workload(s) à 0`;
   setStatus(msg);
@@ -421,7 +435,7 @@ function renderOverview(nodes) {
   const palette = ["#5b9bff","#22c55e","#8b5cf6","#e0a94a","#5fb3c9","#ef6b6b","#d478c4","#38bdf8","#34d399","#a78bfa","#f0883e","#2dd4bf","#818cf8","#f472b6"];
   const nsColor = {}; nsList.forEach((ns,i)=>nsColor[ns]=palette[i%palette.length]);
   const perObj=3.4, minK=13, gapK=3, gapNs=16, nodeW=13, Mt=40, Mb=26;
-  const W = Math.max(host.clientWidth||1100, 900);
+  const W = Math.max(viewW(host), 900);
   const xC = 150, xK = W - 240, xN = xC + (xK - xC) * 0.42;
   const kindPos={}, nsPos={}; let y=Mt;
   for (const ns of nsList) { kindPos[ns]={}; const ks=Object.keys(nsKind[ns]).sort((a,b)=>nsKind[ns][b]-nsKind[ns][a]); const sy=y;
@@ -460,7 +474,7 @@ function renderOverview(nodes) {
   s+=`<text x="${(xN+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">NAMESPACES</text>`;
   s+=`<text x="${(xK+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">TYPES</text>`;
   s+=rib+nds+labels+`</svg>`;
-  host.innerHTML=s;
+  host.innerHTML=s; fitHost(host);
   setStatus(`${total} objets · ${nsList.length} namespaces`);
 }
 
@@ -489,6 +503,38 @@ const cy = cytoscape({
 });
 // Re-rendu (débattu) au redimensionnement de la fenêtre : les schémas se recalculent
 // à la nouvelle largeur du conteneur.
+/* ---- Pan / zoom des schémas SVG : fit-to-window, molette=zoom, espace+glisser=pan ---- */
+const PZ = {};
+let _space = false;
+window.addEventListener("keydown", e => {
+  if (e.code === "Space" && !/INPUT|TEXTAREA|SELECT/.test(((e.target||{}).tagName)||"")) { _space = true; document.body.classList.add("panning"); e.preventDefault(); }
+});
+window.addEventListener("keyup", e => { if (e.code === "Space") { _space = false; document.body.classList.remove("panning"); } });
+function makePanZoom(host){
+  const wrap = host.parentElement;
+  const st = { scale:1, tx:0, ty:0, drag:false, sx:0, sy:0 };
+  const apply = () => { host.style.transform = `translate(${st.tx.toFixed(1)}px,${st.ty.toFixed(1)}px) scale(${st.scale.toFixed(4)})`; };
+  st.fit = () => { const svg = host.querySelector("svg"); if(!svg) return;
+    const vb = svg.viewBox && svg.viewBox.baseVal;
+    const sw = (vb && vb.width) || 1, sh = (vb && vb.height) || 1;
+    const cw = wrap.clientWidth||1, ch = wrap.clientHeight||1;
+    st.scale = Math.min(cw/sw, ch/sh, 1) * 0.98;
+    st.tx = Math.max(0,(cw - sw*st.scale)/2); st.ty = 8; apply(); };
+  wrap.addEventListener("wheel", ev => { if(!host.querySelector("svg")) return; ev.preventDefault();
+    const r = wrap.getBoundingClientRect(), mx = ev.clientX-r.left, my = ev.clientY-r.top;
+    const f = ev.deltaY<0 ? 1.12 : 1/1.12, ns = Math.min(8, Math.max(0.05, st.scale*f));
+    st.tx = mx-(mx-st.tx)*(ns/st.scale); st.ty = my-(my-st.ty)*(ns/st.scale); st.scale = ns; apply(); }, {passive:false});
+  wrap.addEventListener("mousedown", e => { if(!_space) return; e.preventDefault(); st.drag=true; st.sx=e.clientX-st.tx; st.sy=e.clientY-st.ty; });
+  window.addEventListener("mousemove", e => { if(!st.drag) return; st.tx=e.clientX-st.sx; st.ty=e.clientY-st.sy; apply(); });
+  window.addEventListener("mouseup", () => { st.drag=false; });
+  wrap.addEventListener("dblclick", () => st.fit());
+  PZ[host.id] = st; return st;
+}
+["flow","cyint","access","sankey"].forEach(idh => { const h=el(idh); if(h) makePanZoom(h); });
+function fitHost(host){ const p = PZ[host.id]; if(p) requestAnimationFrame(()=>p.fit()); }
+// Largeur cible du schéma = largeur du viewport (le pan/zoom gère le reste).
+function viewW(host){ const w = host.parentElement ? host.parentElement.clientWidth : 0; return Math.max(w || host.clientWidth || 1200, 900); }
+
 let _rzT;
 window.addEventListener("resize", () => { cy.resize();
   clearTimeout(_rzT); _rzT = setTimeout(() => { const m = document.body.dataset.mode;
@@ -627,7 +673,7 @@ function renderInteractions(graph){
   // du nœud cible → sa largeur colle au carré/rectangle d'où il part. Les liens d'un
   // même nœud se regroupent au nœud puis s'éventaillent vers leurs cibles.
   const H0=17, TH=13, gap=22, nodeW=13, Mt=46, Mb=30, leftPad=150, rightPad=150, colW=210;
-  const W=Math.max(host.clientWidth||1200, leftPad+rightPad+maxL*colW+nodeW+40);
+  const W=Math.max(viewW(host), leftPad+rightPad+maxL*colW+nodeW+40);
   const colX=l=> leftPad + colW*l;
   const colH=cols.map(c=>Math.max(0,c.length*(H0+gap)-gap));
   const maxColH=Math.max(H0,...colH);
@@ -641,7 +687,8 @@ function renderInteractions(graph){
   // Dérive RÉELLE = trafic observé non déclaré, MAIS seulement si une base déclarée
   // existe (sinon « observé » neutre = couleur du nœud source). Déclaré-non-observé = ambre.
   const isDrift = e => e.kind==="call" && e.drift;
-  const ribColor=e=> isDrift(e) ? "#ef4444"
+  const ribColor=e=> secMode ? secEdgeCol(e.from,e.to, isDrift(e)?"#ef4444":"#242a34")
+    : isDrift(e) ? "#ef4444"
     : (e.kind==="call"&&e.state==="uses") ? "#e0a94a"
     : KCOL(byId[e.from].kind);
   const ribOp=e=> (e.kind==="call"&&e.state==="uses") ? [.36,.24,.34]
@@ -663,8 +710,8 @@ function renderInteractions(graph){
     const glow=''; // plus de flou sur les rubans : ils restent nets
     rib+=`<path d="${band(P.x+nodeW-1, e.sy, Q.x+2, e.ty, TH)}" fill="url(#${id})"${glow}><title>${esc(byId[e.from].name)} → ${esc(byId[e.to].name)}</title></path>`;
   }
-  for(const id of ids){ const P=pos[id], n=byId[id], c=KCOL(n.kind);
-    if(isSource(id)){
+  for(const id of ids){ const P=pos[id], n=byId[id], c=secNodeCol(id,KCOL(n.kind));
+    if(isSource(id) && !secMode){
       const gid="isrc"+id.replace(/[^a-zA-Z0-9]/g,"");
       defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
       nodes+=`<rect x="${P.x}" y="${P.y}" width="${nodeW}" height="${P.h}" rx="4" fill="url(#${gid})" stroke="rgba(255,255,255,.1)"><title>${esc(n.kind)}/${esc(n.name)} · ${esc(n.namespace||"")}</title></rect>`;
@@ -691,7 +738,7 @@ function renderInteractions(graph){
   s+=`<text x="${leftPad-2}" y="24" fill="#565f70" font-size="11" font-weight="600">← apps / entrée</text>`;
   s+=`<text x="${W-rightPad}" y="24" fill="#565f70" font-size="11" font-weight="600" text-anchor="end">dépendances appelées →</text>`;
   s+=rib+nodes+labels+`</svg>`;
-  host.innerHTML=s;
+  host.innerHTML=s; fitHost(host);
 
   const nIng=ids.filter(id=>byId[id].kind==="Ingress").length;
   let msg=`${ids.length} composants · ${nIng} entrée(s) · ${nTalks+nBoth} appels observés`;
@@ -737,7 +784,7 @@ function renderAccess(graph){
   let i2=idxOf(col[2]);
   col[3].sort((a,b)=>bary(a,inAdj,i2)-bary(b,inAdj,i2)||a.name.localeCompare(b.name));
 
-  const W=Math.max(host.clientWidth||1200,1080), Mt=46, Mb=26;
+  const W=Math.max(viewW(host),1080), Mt=46, Mb=26;
   const leftPad=210, rightPad=230, nodeW=12;
   const colX=i=> leftPad + ((W-leftPad-rightPad)/3)*i;
   const colTot=[]; for(let c=0;c<4;c++){ let t=0; for(const n of col[c]) t+=H[n.id]+gap; colTot[c]=Math.max(0,t-gap); }
@@ -759,13 +806,13 @@ function renderAccess(graph){
   defs+=`<linearGradient id="aflxstart" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#eafcff" stop-opacity=".26"/><stop offset=".09" stop-color="#eafcff" stop-opacity="0"/></linearGradient>`;
   let rib="",nodes="",labels="",gi=0;
   for(const l of links){ const P=pos[l.s],Q=pos[l.t]; if(!P||!Q||l.sy==null||l.ty==null) continue;
-    const c0=ACOL(byId[l.s].kind), gid="ag"+(gi++);
+    const c0=secEdgeCol(l.s,l.t,ACOL(byId[l.s].kind)), gid="ag"+(gi++);
     defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${c0}" stop-opacity=".78"/><stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/><stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
-    const d=band(P.x+nodeW-1,l.sy,l.sth,Q.x+2,l.ty,l.tth);
+    const d=band(P.x+nodeW-3.5,l.sy,l.sth,Q.x+3.5,l.ty,l.tth);
     rib+=`<path d="${d}" fill="url(#${gid})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
     rib+=`<path d="${d}" fill="url(#aflxstart)"/>`;
   }
-  for(let c=0;c<4;c++) for(const n of col[c]){ const p=pos[n.id], cap=ACOL(n.kind);
+  for(let c=0;c<4;c++) for(const n of col[c]){ const p=pos[n.id], cap=secNodeCol(n.id,ACOL(n.kind));
     const kindTag = n.kind==="ClusterRole" ? " [cluster]" : "";
     const nsTag = n.namespace ? " · "+esc(n.namespace) : "";
     const ttl=`<title>${esc(n.kind)}/${esc(n.name)}${n.namespace?" ("+esc(n.namespace)+")":""}</title>`;
@@ -779,17 +826,94 @@ function renderAccess(graph){
   let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui"><defs>${defs}</defs>`;
   for(let c=0;c<4;c++) s+=`<text x="${(colX(c)+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${heads[c]}</text>`;
   s+=rib+nodes+labels+`</svg>`;
-  host.innerHTML=s;
+  host.innerHTML=s; fitHost(host);
   setStatus(`${col[1].length} workloads · ${col[2].length} ServiceAccounts · ${col[3].length} rôles · ${col[0].length} secrets référencés`);
+}
+
+/* =================== SÉCURITÉ — points d'attention (DevSecOps) =================== */
+const SEV = { info:0, low:1, medium:2, high:3, critical:4 };
+const SEV_COLOR = { info:"#8ea2c0", low:"#e3c341", medium:"#e0883a", high:"#e8622f", critical:"#ef4444" };
+const SEV_LABEL = { info:"info", low:"faible", medium:"moyen", high:"élevé", critical:"critique" };
+const CAT_LABEL = { pod:"Durcissement pod", rbac:"RBAC / escalation", exposure:"Exposition", network:"Réseau / latéral" };
+const SEC_GREY = "#464e5a";
+let gFindings=null, secIndex=null, secMode=false;
+async function ensureFindings(){ if(gFindings) return gFindings; try{ gFindings = await fetchJSON("/findings"); }catch(_){ gFindings=[]; } return gFindings; }
+const maxSev = (a,b) => SEV[a]>=SEV[b] ? a : b;
+
+// Findings RÉSEAU (calculés côté front car ils dépendent du trafic live TALKS_TO).
+function computeNetworkFindings(graph){
+  const byId={}; for(const n of graph.nodes) byId[n.id]=n;
+  const allowed=new Set(), ingP=new Set(), egP=new Set();
+  for(const e of graph.edges){ if(e.type==="ALLOWS") allowed.add(e.source+"__"+e.target); else if(e.type==="PROTECTS_IN") ingP.add(e.target); else if(e.type==="PROTECTS_OUT") egP.add(e.source); }
+  const ownerOf={}; for(const e of graph.edges) if(e.type==="OWNED_BY") ownerOf[e.source]=e.target;
+  const top=id=>{let c=ownerOf[id],g=0;while(c&&g++<12){const k=byId[c]&&byId[c].kind;if(WKINDS.includes(k))return c;c=ownerOf[c];}return null;};
+  const svcWl={}; for(const e of graph.edges) if(e.type==="SELECTS"){ const w=top(e.target); if(w&&!svcWl[e.source]) svcWl[e.source]=w; }
+  const resolveWl=id=>{ const n=byId[id]; if(!n) return null; if(n.kind==="Service") return svcWl[id]||id; if(WKINDS.includes(n.kind)) return id; return top(id)||id; };
+  const out=[];
+  for(const e of graph.edges){ if(e.type!=="TALKS_TO") continue;
+    const from=resolveWl(e.source), to=resolveWl(e.target); if(!from||!to||from===to) continue;
+    if((ingP.has(to)||egP.has(from)) && !allowed.has(from+"__"+to)){
+      const fn=byId[from]?byId[from].name:from, tn=byId[to]?byId[to].name:to;
+      out.push({ id:"net/"+from+"__"+to, severity:"high", category:"network", title:"Trafic non autorisé (dérive réseau)",
+        why:"Connexion observée "+fn+" → "+tn+" non couverte par une NetworkPolicy sur une cible isolée : mouvement latéral possible.",
+        ref:"CIS Kubernetes Benchmark §5.3 ; MITRE ATT&CK Containers T1210", node:from, peer:to });
+    }
+  }
+  return out;
+}
+function buildSecIndex(list){
+  const byNode=new Map(), byEdge=new Map();
+  for(const f of list){
+    if(f.peer){ const k=f.node+"__"+f.peer; byEdge.set(k, byEdge.has(k)?maxSev(byEdge.get(k),f.severity):f.severity); }
+    const setN=id=>{ byNode.set(id, byNode.has(id)?maxSev(byNode.get(id),f.severity):f.severity); };
+    setN(f.node); if(f.peer) setN(f.peer);
+  }
+  const order=[...list].sort((a,b)=> SEV[b.severity]-SEV[a.severity] || (a.category||"").localeCompare(b.category||""));
+  return { byNode, byEdge, list:order };
+}
+async function ensureSec(graph){ const base=await ensureFindings(); secIndex=buildSecIndex(base.concat(computeNetworkFindings(graph))); return secIndex; }
+// En mode sécu : nœud non concerné = gris, concerné = couleur de gravité.
+function secNodeCol(id, fallback){ if(!secMode||!secIndex) return fallback; const s=secIndex.byNode.get(id); return s?SEV_COLOR[s]:SEC_GREY; }
+function secEdgeCol(a,b, fallback){ if(!secMode||!secIndex) return fallback; const s=secIndex.byEdge.get(a+"__"+b)||secIndex.byEdge.get(b+"__"+a); return s?SEV_COLOR[s]:"#242a34"; }
+
+function renderSecurity(graph){
+  const host=el("sec");
+  const byId={}; for(const n of graph.nodes) byId[n.id]=n;
+  const list=(secIndex&&secIndex.list)||[];
+  if(!list.length){ host.innerHTML='<div id="sec-empty">Aucun point d\'attention sur les règles actuelles. Ce calque couvre durcissement pod, RBAC/escalation, exposition et dérive réseau — ce n\'est pas un scanner exhaustif (compléter avec kube-bench / kubescape / Trivy).</div>'; setStatus("sécurité : 0 point d'attention"); return; }
+  const cnt={}; for(const f of list) cnt[f.severity]=(cnt[f.severity]||0)+1;
+  const order=["critical","high","medium","low","info"];
+  let sum='<div class="sec-sum">';
+  for(const s of order) if(cnt[s]) sum+=`<span class="sec-pill"><span class="dot" style="background:${SEV_COLOR[s]}"></span><b>${cnt[s]}</b> ${SEV_LABEL[s]}</span>`;
+  sum+='</div>';
+  const nm=id=>{ const n=byId[id]; return n?`${esc(n.name)}${n.namespace?" · "+esc(n.namespace):""}`:esc(id); };
+  const kd=id=>{ const n=byId[id]; return n?esc(n.kind)+" ":""; };
+  const cats={}; for(const f of list){ (cats[f.category]=cats[f.category]||[]).push(f); }
+  const catOrder=Object.keys(cats).sort((a,b)=> Math.max(...cats[b].map(f=>SEV[f.severity])) - Math.max(...cats[a].map(f=>SEV[f.severity])));
+  let bodyHtml="";
+  for(const c of catOrder){
+    bodyHtml+=`<div class="sec-grp">${CAT_LABEL[c]||c} · ${cats[c].length}</div>`;
+    for(const f of cats[c]){
+      const col=SEV_COLOR[f.severity]||SEC_GREY;
+      const tgt = f.peer ? `${kd(f.node)}<b style="color:#cdd6e2">${nm(f.node)}</b> → ${kd(f.peer)}<b style="color:#cdd6e2">${nm(f.peer)}</b>` : `${kd(f.node)}<b style="color:#cdd6e2">${nm(f.node)}</b>`;
+      bodyHtml+=`<div class="sec-card"><span class="sec-bar" style="background:${col}"></span>`
+        +`<div><h4>${esc(f.title)}</h4><div class="why">${esc(f.why)}</div>`
+        +`<div class="meta">${tgt}</div><div class="ref">↳ ${esc(f.ref)}</div></div>`
+        +`<span class="sev-tag" style="background:${col}">${SEV_LABEL[f.severity]||f.severity}</span></div>`;
+    }
+  }
+  host.innerHTML=sum+bodyHtml;
+  const prio=(cnt.critical||0)+(cnt.high||0);
+  setStatus(`sécurité : ${list.length} point(s) d'attention${prio?` · ${prio} à traiter en priorité`:""}`);
 }
 
 /* =================== Bascule =================== */
 async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
   el("hint").innerHTML="Réseau &amp; interactions — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré (config) non observé</b> · <b style='color:#ef4444'>rouge=dérive réseau</b> = trafic observé <b>non autorisé par une NetworkPolicy</b> (rouge seulement si la cible est protégée).";
-  try { renderInteractions(await ensureGraph()); } catch(e){ setStatus("API injoignable : "+e.message); } }
+  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); renderInteractions(g); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow"); setLegend(KIND_LEGEND);
-  el("hint").textContent="Exécution — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress, groupé par namespace. L'épaisseur = le nombre de pods. Couleur = kind. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
-  try { const g=await ensureGraph(); fillNsPicker(g); renderFlow(g, el("ns-picker").value); }
+  el("hint").innerHTML="Exécution — colonnes par <b>rôle</b> (plusieurs types empilés, colonnes vides masquées) : <b style='color:#d0a15e'>Dépendances</b> (PVC / Secret / ConfigMap) → <b>Workload</b> → Pod → Service → Ingress, groupé par namespace. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod. <span style='color:#5b6472'>molette = zoom · espace + glisser = déplacer.</span>";
+  try { const g=await ensureGraph(); fillNsPicker(g); if(secMode) await ensureSec(g); renderFlow(g, el("ns-picker").value); }
   catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
   setLegend('<span class="chip" style="color:var(--muted)">Couleur = namespace · hauteur = nombre d\'objets</span>');
@@ -800,14 +924,23 @@ async function showExplore(){ document.body.dataset.mode="explore"; setTab("expl
   try { fillPicker(await ensureNodes()); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showAccess(){ document.body.dataset.mode="access"; setTab("access"); setLegend(ACCESS_LEGEND);
   el("hint").innerHTML="Accès &amp; identité — pour chaque app : ses <b style='color:#d98a5b'>secrets</b> référencés (nom seul, jamais la valeur) → le <b>workload</b> → le <b style='color:#7c9cf5'>ServiceAccount</b> sous lequel il tourne → les <b style='color:#c678c9'>Rôles</b> qui lui sont accordés (RBAC). Répond à « qui tourne comme quoi, et qu'est-ce que ça peut faire ».";
-  try { renderAccess(await ensureGraph()); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
-function setTab(m){ for (const t of ["flow","interactions","access","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
-el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
-el("ns-picker").onchange=()=>{ if(gGraph) renderFlow(gGraph, el("ns-picker").value); };
+  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); renderAccess(g); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
+async function showSecurity(){ document.body.dataset.mode="security"; setTab("security"); setLegend(SEC_LEGEND);
+  el("hint").innerHTML="Sécurité — <b>points d'attention</b> (informer, pas corriger) : durcissement pod, RBAC/escalation, exposition, dérive réseau. Gravité <b style='color:#e3c341'>faible</b> → <b style='color:#e0883a'>moyen</b> → <b style='color:#e8622f'>élevé</b> → <b style='color:#ef4444'>critique</b>. Active « mode sécu » (en haut) sur les autres onglets pour colorer ces risques directement sur la carte.";
+  try { const g=await ensureGraph(); await ensureSec(g); renderSecurity(g); }
+  catch(e){ setStatus("API injoignable : "+e.message); el("sec").innerHTML="<div id='sec-empty'>API injoignable : "+esc(e.message)+"</div>"; } }
+function setTab(m){ for (const t of ["flow","interactions","access","security","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
+el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-security").onclick=showSecurity; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
+el("ns-picker").onchange=()=>{ if(gGraph){ if(secMode) ensureSec(gGraph).then(()=>renderFlow(gGraph, el("ns-picker").value)); else renderFlow(gGraph, el("ns-picker").value); } };
 el("hide-infra").onchange=()=>{ if(gGraph) renderInteractions(gGraph); };
-el("refresh").onclick=async()=>{ gGraph=null; gNodes=null;
+el("sec-mode").onchange=async()=>{ secMode=el("sec-mode").checked; const m=document.body.dataset.mode;
+  if(secMode && gGraph){ try{ await ensureSec(gGraph); }catch(_){} }
+  if(m==="flow"&&gGraph) renderFlow(gGraph, el("ns-picker").value);
+  else if(m==="interactions"&&gGraph) renderInteractions(gGraph);
+  else if(m==="access"&&gGraph) renderAccess(gGraph); };
+el("refresh").onclick=async()=>{ gGraph=null; gNodes=null; gFindings=null; secIndex=null;
   const m=document.body.dataset.mode;
-  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="access") showAccess(); else if(m==="overview") showOverviewTab(); else showExplore(); };
+  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="access") showAccess(); else if(m==="security") showSecurity(); else if(m==="overview") showOverviewTab(); else showExplore(); };
 // Légende contextuelle : Flux/Carte affichent le vrai code couleur par KIND (+ statut) ;
 // Vue d'ensemble / Explorer gardent le code par couche.
 const chip = (c,l) => `<span class="chip"><span class="dot" style="background:${c}"></span>${l}</span>`;
@@ -820,6 +953,9 @@ const KIND_LEGEND =
 const ACCESS_LEGEND =
   chip("#d98a5b","Secret (nom seul)") + chip("oklch(0.88 0.22 178.95)","Workload") +
   chip("#7c9cf5","ServiceAccount") + chip("#c678c9","Role / ClusterRole");
+const SEC_LEGEND =
+  chip("#e3c341","faible") + chip("#e0883a","moyen") + chip("#e8622f","élevé") + chip("#ef4444","critique") +
+  `<span class="chip" style="margin-left:10px;color:var(--muted)">gravité croissante · en mode sécu, gris = pas de point d'attention</span>`;
 const setLegend = html => { el("legend").innerHTML = html; };
 setLegend(KIND_LEGEND);
 

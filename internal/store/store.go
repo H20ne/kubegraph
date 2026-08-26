@@ -18,8 +18,25 @@ type Store struct {
 	nodes   map[graph.NodeID]graph.Node
 	edges   []graph.Edge
 	adj     map[graph.NodeID][]graph.NodeID
-	ipIndex map[string]graph.NodeID // IP -> nœud (pods + services)
-	flows   map[graph.Edge]struct{} // arêtes TALKS_TO observées (dédupliquées)
+	ipIndex  map[string]graph.NodeID // IP -> nœud (pods + services)
+	flows    map[graph.Edge]struct{} // arêtes TALKS_TO observées (dédupliquées)
+	findings []graph.Finding         // points d'attention sécurité (structurels)
+}
+
+// SetFindings remplace la liste des findings sécurité (calculés à la collecte).
+func (s *Store) SetFindings(f []graph.Finding) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.findings = f
+}
+
+// Findings retourne une copie des findings sécurité.
+func (s *Store) Findings() []graph.Finding {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]graph.Finding, len(s.findings))
+	copy(out, s.findings)
+	return out
 }
 
 // New crée un store vide.
