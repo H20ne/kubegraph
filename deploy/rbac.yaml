@@ -25,17 +25,19 @@ metadata:
   name: kubegraph-readonly
 rules:
   # Cœur : Pods, Services, ConfigMaps (les ConfigMaps servent au scan des
-  # dépendances de config — références de services par nom DNS).
+  # dépendances de config), Namespaces (labels pour les namespaceSelector des
+  # NetworkPolicies). NB : on ne demande PAS "secrets" — les secrets utilisés
+  # sont déduits des specs des workloads, sans jamais lire leurs valeurs.
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps"]
+    resources: ["pods", "services", "configmaps", "namespaces"]
     verbs: ["get", "list", "watch"]
-  # Workloads : Deployments et ReplicaSets.
+  # Workloads : Deployments, ReplicaSets, StatefulSets, DaemonSets.
   - apiGroups: ["apps"]
-    resources: ["deployments", "replicasets"]
+    resources: ["deployments", "replicasets", "statefulsets", "daemonsets"]
     verbs: ["get", "list", "watch"]
-  # Réseau : Ingresses.
+  # Réseau : Ingresses + NetworkPolicies (base déclarée pour la détection de dérive).
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
+    resources: ["ingresses", "networkpolicies"]
     verbs: ["get", "list", "watch"]
   # KEDA : dépendances de scaling (cross-namespace). Optionnel — si KEDA n'est
   # pas installé, l'outil fonctionne sans (la lecture échoue en silence).

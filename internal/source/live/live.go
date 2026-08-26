@@ -9,7 +9,10 @@ import (
 	"context"
 	"fmt"
 
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -158,7 +161,68 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 	// env / args / command / ConfigMaps.
 	edges = append(edges, s.collectConfigDeps(ctx, deployments, statefulSets, daemonSets, services)...)
 
+	// NetworkPolicy -> arêtes ALLOWS (base déclarée pour la détection de dérive).
+	topWL := topWorkloadMap(deployments.Items, statefulSets.Items, daemonSets.Items, replicaSets.Items, pods.Items)
+	np, ne := s.collectNetpol(ctx, pods.Items, topWL, s.namespaceLabels(ctx))
+	nodes = append(nodes, np...)
+	edges = append(edges, ne...)
+
 	return nodes, edges, nil
+}
+
+// topWorkloadMap construit : UID de pod -> UID de son workload de tête
+// (Deployment/StatefulSet/DaemonSet), en remontant les ownerReferences
+// contrôleurs (le ReplicaSet intermédiaire d'un Deployment est traversé).
+func topWorkloadMap(deps []appsv1.Deployment, sts []appsv1.StatefulSet, ds []appsv1.DaemonSet, rs []appsv1.ReplicaSet, pods []corev1.Pod) map[string]string {
+	owner := map[string]string{} // enfant UID -> contrôleur UID
+	kindByUID := map[string]string{}
+	for i := range deps {
+		kindByUID[string(deps[i].UID)] = "Deployment"
+	}
+	for i := range sts {
+		kindByUID[string(sts[i].UID)] = "StatefulSet"
+	}
+	for i := range ds {
+		kindByUID[string(ds[i].UID)] = "DaemonSet"
+	}
+	for i := range rs {
+		r := &rs[i]
+		kindByUID[string(r.UID)] = "ReplicaSet"
+		if c := metav1.GetControllerOf(r); c != nil {
+			owner[string(r.UID)] = string(c.UID)
+		}
+	}
+	isWL := func(k string) bool { return k == "Deployment" || k == "StatefulSet" || k == "DaemonSet" }
+	out := make(map[string]string, len(pods))
+	for i := range pods {
+		c := metav1.GetControllerOf(&pods[i])
+		if c == nil {
+			continue
+		}
+		cur := string(c.UID)
+		for g := 0; g < 12 && cur != ""; g++ {
+			if isWL(kindByUID[cur]) {
+				out[string(pods[i].UID)] = cur
+				break
+			}
+			cur = owner[cur]
+		}
+	}
+	return out
+}
+
+// namespaceLabels retourne : nom de namespace -> ses labels (pour les
+// namespaceSelector des NetworkPolicies). Non bloquant si non accessible.
+func (s *Source) namespaceLabels(ctx context.Context) map[string]labels.Set {
+	out := map[string]labels.Set{}
+	nss, err := s.client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return out
+	}
+	for i := range nss.Items {
+		out[nss.Items[i].Name] = labels.Set(nss.Items[i].Labels)
+	}
+	return out
 }
 
 // node mappe un ObjectMeta Kubernetes vers un nœud du graphe.

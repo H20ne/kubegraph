@@ -75,8 +75,8 @@
   <header>
     <span class="brand">kube<span>graph</span></span>
     <div class="tabs">
-      <button id="tab-flow">Flux</button>
-      <button id="tab-interactions" class="active">Carte du cluster</button>
+      <button id="tab-flow">Exécution</button>
+      <button id="tab-interactions" class="active">Réseau &amp; interactions</button>
       <button id="tab-overview">Vue d'ensemble</button>
       <button id="tab-explore">Explorer</button>
     </div>
@@ -485,6 +485,11 @@ function renderInteractions(graph){
   const hideInfra = el("hide-infra").checked;
   const okNs = id => !hideInfra || !INFRA_NS.has(byId[id].namespace);
 
+  // Base DÉCLARÉE réseau : arêtes ALLOWS issues des NetworkPolicies (workload -> workload).
+  const allowedSet=new Set(), protectedWl=new Set(), nsWithPolicy=new Set();
+  for(const n of graph.nodes) if(n.kind==="NetworkPolicy") nsWithPolicy.add(n.namespace);
+  for(const e of graph.edges) if(e.type==="ALLOWS"){ allowedSet.add(e.source+"__"+e.target); protectedWl.add(e.target); }
+
   // On assemble UNE seule carte : entrée (ingress→service→workload) + interactions.
   const nodeSet=new Set(), edges=[];
   // 1) Entrée : Ingress -> Service.
@@ -508,15 +513,21 @@ function renderInteractions(graph){
     const to = depSvc || depWl;
     if(!to||from===to||!byId[to]||!okNs(to)) continue;
     nodeSet.add(from); nodeSet.add(to);
-    const k=from+"__"+to; const p=pairs[k]||(pairs[k]={from,to,uses:false,talks:false}); if(e.type==="USES")p.uses=true; else p.talks=true;
+    const k=from+"__"+to; const p=pairs[k]||(pairs[k]={from,to,wlTo:(depWl||to),uses:false,talks:false}); if(e.type==="USES")p.uses=true; else p.talks=true;
     if(depSvc&&depWl&&depWl!==depSvc&&byId[depWl]&&okNs(depWl)){ nodeSet.add(depWl); backsDep.add(depSvc+"__"+depWl); }
   }
-  // Une base DÉCLARÉE existe-t-elle ? (au moins un USES quelque part) Sans elle, on ne
-  // peut PAS qualifier un trafic observé de « dérive » : tout serait faux-rouge.
-  const declaredBaseline = Object.values(pairs).some(p=>p.uses);
-  let nBoth=0,nUses=0,nTalks=0;
+  // Dérive réseau = trafic observé (talks) vers une cible PROTÉGÉE par une
+  // NetworkPolicy mais NON autorisé par elle. Conservateur : on ne juge que les
+  // cibles portant au moins une règle ALLOWS (protectedWl) → pas de faux-rouge
+  // là où il n'y a aucune policy.
+  const hasPolicy = nsWithPolicy.size>0;
+  let nBoth=0,nUses=0,nTalks=0,nDrift=0;
   for(const p of Object.values(pairs)){ const st=p.uses&&p.talks?"both":p.talks?"talks":"uses";
-    if(st==="both")nBoth++; else if(st==="talks")nTalks++; else nUses++; edges.push({from:p.from,to:p.to,kind:"call",state:st}); }
+    let drift=false;
+    if(st==="talks" && protectedWl.has(p.wlTo)) drift = !allowedSet.has(p.from+"__"+p.wlTo);
+    if(st==="both")nBoth++; else if(st==="talks")nTalks++; else nUses++;
+    if(drift) nDrift++;
+    edges.push({from:p.from,to:p.to,kind:"call",state:st,drift}); }
   for(const bp of backsDep){ const i=bp.lastIndexOf("__"); edges.push({from:bp.slice(0,i),to:bp.slice(i+2),kind:"backs"}); }
 
   const host=el("cyint"), empty=el("int-empty");
@@ -565,7 +576,7 @@ function renderInteractions(graph){
 
   // Dérive RÉELLE = trafic observé non déclaré, MAIS seulement si une base déclarée
   // existe (sinon « observé » neutre = couleur du nœud source). Déclaré-non-observé = ambre.
-  const isDrift = e => e.kind==="call" && e.state==="talks" && declaredBaseline;
+  const isDrift = e => e.kind==="call" && e.drift;
   const ribColor=e=> isDrift(e) ? "#ef4444"
     : (e.kind==="call"&&e.state==="uses") ? "#e0a94a"
     : KCOL(byId[e.from].kind);
@@ -619,24 +630,23 @@ function renderInteractions(graph){
   host.innerHTML=s;
 
   const nIng=ids.filter(id=>byId[id].kind==="Ingress").length;
-  let msg=`${ids.length} composants · ${nIng} entrée(s)`;
-  if(declaredBaseline){
-    msg+=` · ${nBoth} confirmés`;
-    if(nUses) msg+=`, ${nUses} déclarés seuls`;
-    if(nTalks) msg+=` · ${nTalks} dérive(s) ⚠`;
+  let msg=`${ids.length} composants · ${nIng} entrée(s) · ${nTalks+nBoth} appels observés`;
+  if(nUses) msg+=` · ${nUses} déclarés non observés`;
+  if(hasPolicy){
+    msg+=` · NetworkPolicy active`;
+    if(nDrift) msg+=` · ${nDrift} dérive(s) réseau ⚠`; else msg+=` · aucune dérive`;
   } else {
-    // Pas de base déclarée : on ne parle pas de dérive, juste de trafic observé.
-    msg+=` · ${nTalks+nBoth} appels observés · aucune config déclarée (pas de comparatif dérive)`;
+    msg+=` · aucune NetworkPolicy (pas de comparatif dérive)`;
   }
   setStatus(msg);
 }
 
 /* =================== Bascule =================== */
 async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
-  el("hint").innerHTML="Carte du cluster — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source et finit en gris. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré mais non observé</b> · <b style='color:#ef4444'>rouge=dérive</b> (observé non déclaré, <i>uniquement si une config déclarée existe</i>).";
+  el("hint").innerHTML="Réseau &amp; interactions — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré (config) non observé</b> · <b style='color:#ef4444'>rouge=dérive réseau</b> = trafic observé <b>non autorisé par une NetworkPolicy</b> (rouge seulement si la cible est protégée).";
   try { renderInteractions(await ensureGraph()); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow"); setLegend(KIND_LEGEND);
-  el("hint").textContent="Flux — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Couleur = kind. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
+  el("hint").textContent="Exécution — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress, groupé par namespace. L'épaisseur = le nombre de pods. Couleur = kind. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
   try { const g=await ensureGraph(); fillNsPicker(g); renderFlow(g, el("ns-picker").value); }
   catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");

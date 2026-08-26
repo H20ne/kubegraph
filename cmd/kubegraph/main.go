@@ -1,5 +1,10 @@
-// Commande kubegraph — point d'entrée du hub (MVP).
-// Étape 2 : connecte la source live et affiche le nombre de nœuds par kind.
+// Commande kubegraph — point d'entrée du hub.
+//
+// Collecte l'état du cluster (source live), le charge en mémoire et sert l'API.
+// Avec --agent (ou KUBEGRAPH_AGENT=1), lance EN PLUS l'agent conntrack DANS le
+// même process : il lit la table de connexions du noyau et écrit directement
+// dans le store — plus besoin d'un second terminal ni de token en mono-nœud.
+// (nécessite les droits root pour lire /proc/net/nf_conntrack : lancer sous sudo.)
 package main
 
 import (
@@ -8,17 +13,19 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"kubegraph/internal/api"
+	"kubegraph/internal/conntrack"
 	"kubegraph/internal/source/live"
 	"kubegraph/internal/store"
 )
 
-// version du binaire (à remplacer par une injection au build plus tard).
-const version = "0.11.0-flows"
+const version = "0.12.0-netpol"
 
 func main() {
-	// kubeconfig via l'env KUBECONFIG, sinon règles par défaut (~/.kube/config).
+	agentMode := hasFlag("--agent") || os.Getenv("KUBEGRAPH_AGENT") == "1"
+
 	src, err := live.New(os.Getenv("KUBECONFIG"), "")
 	if err != nil {
 		log.Fatalf("source live : %v", err)
@@ -37,26 +44,69 @@ func main() {
 	for _, e := range edges {
 		edgeCounts[string(e.Type)]++
 	}
-
 	fmt.Printf("kubegraph %s — cluster %q : %d nœuds, %d arêtes\n", version, src.ClusterID(), len(nodes), len(edges))
-	for _, kind := range []string{"Deployment", "ReplicaSet", "Pod", "Service", "Ingress"} {
-		fmt.Printf("  %-12s %d\n", kind, counts[kind])
+	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "Pod", "Service", "Ingress", "NetworkPolicy"} {
+		if counts[kind] > 0 {
+			fmt.Printf("  %-14s %d\n", kind, counts[kind])
+		}
 	}
 	fmt.Println("arêtes :")
-	for _, t := range []string{"OWNED_BY", "SELECTS", "ROUTES_TO"} {
-		fmt.Printf("  %-12s %d\n", t, edgeCounts[t])
+	for _, t := range []string{"OWNED_BY", "SELECTS", "ROUTES_TO", "USES", "ALLOWS", "SCALES", "TRIGGERS"} {
+		if edgeCounts[t] > 0 {
+			fmt.Printf("  %-12s %d\n", t, edgeCounts[t])
+		}
 	}
 
-	// Charge le graphe en mémoire.
 	st := store.New()
 	st.Load(nodes, edges)
 
-	// Démarre l'API HTTP.
+	// Agent embarqué : lit conntrack et pousse les flux observés dans le store.
+	if agentMode {
+		go runEmbeddedAgent(st)
+	}
+
 	addr := os.Getenv("KUBEGRAPH_ADDR")
 	if addr == "" {
 		addr = ":8080"
 	}
 	handler := api.New(st, os.Getenv("KUBEGRAPH_INGEST_TOKEN"))
-	log.Printf("API kubegraph sur %s — ex : /ego?cluster=%s&uid=<uid>&depth=2", addr, src.ClusterID())
+	mode := "hub"
+	if agentMode {
+		mode = "hub + agent embarqué"
+	}
+	log.Printf("kubegraph (%s) sur %s — API /graph, /nodes, /ego", mode, addr)
 	log.Fatal(http.ListenAndServe(addr, handler.Handler()))
+}
+
+// runEmbeddedAgent lit la table conntrack toutes les 15 s et ajoute les flux
+// observés au store. Écriture directe : ni HTTP ni token (même process).
+func runEmbeddedAgent(st *store.Store) {
+	const every = 15 * time.Second
+	log.Printf("agent embarqué actif — source %s (root requis)", conntrack.Path)
+	for {
+		flows, err := conntrack.Read(conntrack.Path)
+		if err != nil {
+			log.Printf("agent embarqué : lecture conntrack : %v (lancer sous sudo ?)", err)
+		} else {
+			n := 0
+			for _, fl := range flows {
+				if st.AddFlow(fl.Src, fl.Dst) {
+					n++
+				}
+			}
+			if n > 0 {
+				log.Printf("agent embarqué : %d nouveaux flux observés", n)
+			}
+		}
+		time.Sleep(every)
+	}
+}
+
+func hasFlag(f string) bool {
+	for _, a := range os.Args[1:] {
+		if a == f {
+			return true
+		}
+	}
+	return false
 }
