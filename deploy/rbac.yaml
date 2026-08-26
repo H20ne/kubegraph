@@ -1,0 +1,51 @@
+# RBAC lecture seule pour kubegraph.
+#
+# Principe : l'outil ne fait QUE lire (get/list/watch). Aucun verbe d'écriture
+# (create/update/patch/delete) n'est demandé. Un ClusterRole est utilisé car
+# l'outil liste les ressources de tous les namespaces.
+#
+# Ces manifestes conviennent aux deux modèles :
+#   - central : le hub utilise le token de ce ServiceAccount via un kubeconfig.
+#   - hub-spoke : l'agent tourne dans le cluster et monte ce SA (repli in-cluster).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubegraph
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kubegraph
+  namespace: kubegraph
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kubegraph-readonly
+rules:
+  # Cœur : Pods et Services.
+  - apiGroups: [""]
+    resources: ["pods", "services"]
+    verbs: ["get", "list", "watch"]
+  # Workloads : Deployments et ReplicaSets.
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+  # Réseau : Ingresses.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kubegraph-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kubegraph-readonly
+subjects:
+  - kind: ServiceAccount
+    name: kubegraph
+    namespace: kubegraph

@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>kubegraph</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 10px 14px; border-bottom: 1px solid #8883; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0 12px 0 0; }
+  label { font-size: 12px; opacity: .8; }
+  select, input, button { font: inherit; padding: 5px 8px; border: 1px solid #8886; border-radius: 6px; background: transparent; color: inherit; }
+  button { cursor: pointer; }
+  input[type=number] { width: 60px; }
+  #cy { flex: 1; min-height: 0; }
+  #legend { padding: 8px 14px; border-top: 1px solid #8883; display: flex; gap: 16px; flex-wrap: wrap; font-size: 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 5px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; display: inline-block; }
+  #status { font-size: 12px; opacity: .75; margin-left: auto; }
+  .hint { font-size: 12px; opacity: .7; padding: 0 14px 8px; }
+</style>
+</head>
+<body>
+  <header>
+    <h1>kubegraph</h1>
+    <label>API <input id="api" value="http://localhost:8080" size="22"></label>
+    <label>nœud de départ <select id="picker"><option value="">— charger l'API —</option></select></label>
+    <label>profondeur <input id="depth" type="number" value="1" min="0" max="6"></label>
+    <button id="load">Charger</button>
+    <button id="reset">Reset</button>
+    <span id="status"></span>
+  </header>
+  <div class="hint">Clique un nœud pour déplier son cercle suivant.</div>
+  <div id="cy"></div>
+  <div id="legend"></div>
+
+<script>
+const LAYER_COLORS = {
+  workload:   "#4c78a8",
+  networking: "#59a14f",
+  config:     "#b279a2",
+  security:   "#e15759",
+  unknown:    "#9c9c9c",
+};
+
+const el = id => document.getElementById(id);
+const apiBase = () => el("api").value.replace(/\/+$/, "");
+const setStatus = t => { el("status").textContent = t; };
+
+// uid = tout ce qui suit le premier "/" de l'id "cluster/uid".
+function uidOf(node) {
+  const id = node.data("id"), cluster = node.data("cluster");
+  return id.slice(cluster.length + 1);
+}
+
+const cy = cytoscape({
+  container: el("cy"),
+  style: [
+    { selector: "node", style: {
+      "background-color": e => LAYER_COLORS[e.data("layer")] || LAYER_COLORS.unknown,
+      "label": e => `${e.data("kind")}/${e.data("name")}`,
+      "font-size": 10, "color": "#ccc", "text-outline-width": 2, "text-outline-color": "#000a",
+      "width": e => e.data("degree") === 0 ? 34 : 22,
+      "height": e => e.data("degree") === 0 ? 34 : 22,
+      "border-width": e => e.data("degree") === 0 ? 3 : 0,
+      "border-color": "#fff",
+    }},
+    { selector: "edge", style: {
+      "width": 1.5, "line-color": "#8888", "target-arrow-color": "#8888",
+      "target-arrow-shape": "triangle", "curve-style": "bezier",
+      "label": "data(type)", "font-size": 8, "color": "#999", "text-rotation": "autorotate",
+    }},
+  ],
+});
+
+let maxDegree = 0;
+
+function relayout() {
+  cy.layout({
+    name: "concentric",
+    concentric: n => maxDegree - (n.data("degree") ?? maxDegree) + 1, // degré 0 au centre
+    levelWidth: () => 1,
+    minNodeSpacing: 40,
+    animate: true, animationDuration: 300,
+  }).run();
+}
+
+// Fusionne un sous-graphe (réponse /ego) dans le graphe existant.
+function merge(ego) {
+  cy.batch(() => {
+    for (const n of ego.nodes) {
+      const existing = cy.getElementById(n.id);
+      if (existing.nonempty()) {
+        // garde le plus petit degré déjà connu (le cercle le plus proche).
+        const d = Math.min(existing.data("degree"), n.degree);
+        existing.data("degree", d);
+      } else {
+        cy.add({ group: "nodes", data: { ...n } });
+      }
+      maxDegree = Math.max(maxDegree, n.degree);
+    }
+    for (const e of ego.edges) {
+      const id = `${e.source}__${e.type}__${e.target}`;
+      if (cy.getElementById(id).empty()) {
+        cy.add({ group: "edges", data: { id, source: e.source, target: e.target, type: e.type } });
+      }
+    }
+  });
+  relayout();
+}
+
+async function fetchEgo(cluster, uid, depth) {
+  const url = `${apiBase()}/ego?cluster=${encodeURIComponent(cluster)}&uid=${encodeURIComponent(uid)}&depth=${depth}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${(await res.json()).error || ""}`);
+  return res.json();
+}
+
+async function loadNodes() {
+  setStatus("chargement…");
+  const res = await fetch(`${apiBase()}/nodes`);
+  if (!res.ok) throw new Error(`/nodes ${res.status}`);
+  const nodes = await res.json();
+  const picker = el("picker");
+  picker.innerHTML = "";
+  for (const n of nodes) {
+    const opt = document.createElement("option");
+    opt.value = JSON.stringify({ cluster: n.cluster, id: n.id });
+    opt.textContent = `${n.kind}/${n.name}${n.namespace ? " ("+n.namespace+")" : ""}`;
+    picker.appendChild(opt);
+  }
+  setStatus(`${nodes.length} nœuds disponibles`);
+}
+
+// Clic sur un nœud : déplie son cercle suivant.
+cy.on("tap", "node", async (evt) => {
+  const node = evt.target;
+  try {
+    setStatus(`expansion de ${node.data("name")}…`);
+    const ego = await fetchEgo(node.data("cluster"), uidOf(node), 1);
+    merge(ego);
+    setStatus(`${cy.nodes().length} nœuds affichés`);
+  } catch (e) { setStatus("erreur : " + e.message); }
+});
+
+el("load").onclick = async () => {
+  try {
+    const picker = el("picker");
+    if (!picker.value) { await loadNodes(); return; }
+    const { cluster, id } = JSON.parse(picker.value);
+    const uid = id.slice(cluster.length + 1);
+    cy.elements().remove(); maxDegree = 0;
+    const ego = await fetchEgo(cluster, uid, parseInt(el("depth").value, 10));
+    merge(ego);
+    setStatus(`${cy.nodes().length} nœuds affichés`);
+  } catch (e) { setStatus("erreur : " + e.message); }
+};
+
+el("reset").onclick = () => { cy.elements().remove(); maxDegree = 0; setStatus("réinitialisé"); };
+
+// Légende.
+el("legend").innerHTML = Object.entries(LAYER_COLORS)
+  .map(([k, c]) => `<span class="chip"><span class="dot" style="background:${c}"></span>${k}</span>`)
+  .join("");
+
+// Au chargement de la page, tente de peupler le menu.
+loadNodes().catch(e => setStatus("API injoignable : " + e.message));
+</script>
+</body>
+</html>
