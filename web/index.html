@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>kubegraph</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js"></script>
 <style>
   :root {
@@ -31,18 +33,22 @@
   .tabs { display:inline-flex; background:var(--panel2); border:1px solid var(--border); border-radius:8px; overflow:hidden; }
   .tabs button { border:0; border-radius:0; background:transparent; padding:6px 14px; color:var(--muted); }
   .tabs button.active { background:var(--accent); color:#06101f; font-weight:600; }
-  #flow-controls, #explorer-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
+  #flow-controls, #explorer-controls, #int-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
   body[data-mode="flow"] #flow-controls { display:flex; }
   body[data-mode="explore"] #explorer-controls { display:flex; }
+  body[data-mode="interactions"] #int-controls { display:inline-flex; }
   .switch { font-size:12px; color:var(--muted); }
   .hint { font-size:12px; color:var(--muted); padding:8px 16px 0; }
   .stage { flex:1; min-height:0; position:relative; display:flex; }
   #flow-wrap, #sankey-wrap { flex:1; min-height:0; overflow:auto; display:none; }
+  #flow-wrap, #sankey-wrap { background:#08090c; padding:14px 18px; }
+  /* Schémas responsive : jamais plus large que le conteneur (pas de débordement). */
+  #flow svg, #cyint svg, #sankey svg { max-width:100%; height:auto; display:block; }
   body[data-mode="flow"] #flow-wrap { display:block; }
   body[data-mode="overview"] #sankey-wrap { display:block; }
-  #int-wrap { flex:1; min-height:0; display:none; position:relative; }
+  #int-wrap { flex:1; min-height:0; display:none; position:relative; overflow:auto; background:#08090c; padding:14px 18px; }
   body[data-mode="interactions"] #int-wrap { display:block; }
-  #cyint { width:100%; height:100%; }
+  #cyint { width:100%; }
   #int-empty { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--muted); font-size:13px; padding:0 40px; display:none; }
   #explore-wrap { flex:1; min-height:0; display:none; }
   body[data-mode="explore"] #explore-wrap { display:flex; }
@@ -65,12 +71,12 @@
   svg .warn { stroke:var(--warn); stroke-width:2; }
 </style>
 </head>
-<body data-mode="flow">
+<body data-mode="interactions">
   <header>
     <span class="brand">kube<span>graph</span></span>
     <div class="tabs">
-      <button id="tab-flow" class="active">Flux</button>
-      <button id="tab-interactions">Interactions</button>
+      <button id="tab-flow">Flux</button>
+      <button id="tab-interactions" class="active">Carte du cluster</button>
       <button id="tab-overview">Vue d'ensemble</button>
       <button id="tab-explore">Explorer</button>
     </div>
@@ -78,6 +84,9 @@
     <button id="refresh">Rafraîchir</button>
     <span id="flow-controls">
       <label>namespace <select id="ns-picker"></select></label>
+    </span>
+    <span id="int-controls">
+      <label class="switch"><input type="checkbox" id="hide-infra" checked> masquer l'infra</label>
     </span>
     <span id="explorer-controls">
       <label>départ <select id="picker"><option value="">—</option></select></label>
@@ -200,10 +209,22 @@ function renderFlow(graph, ns) {
   for (const n of col[3]) pv[n.id] = (inc[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0);// Ingress
   const flinks = links;
 
+  // Retirer les nœuds ISOLÉS (aucun ruban) : pods orphelins, services fantômes.
+  // On garde quand même les workloads (un workload à 0 pod est un signal) et les
+  // services/ingress "cassés" (0 pod / 0 flux), eux aussi porteurs d'info.
+  const connected = new Set(); for (const l of flinks) { connected.add(l.s); connected.add(l.t); }
+  const badFlag = n => { const v = pv[n.id]||0;
+    if (n.kind === "Service") return v === 0 && !n.noSelector;
+    if (n.kind === "Ingress") return v === 0; return false; };
+  col[1] = col[1].filter(n => connected.has(n.id));
+  col[2] = col[2].filter(n => connected.has(n.id) || badFlag(n));
+  col[3] = col[3].filter(n => connected.has(n.id) || badFlag(n));
+
   if (col.every(c => c.length === 0)) { host.innerHTML = "<p style='color:var(--muted);padding:24px'>Rien à afficher dans ce namespace.</p>"; return; }
 
-  // Ordonnancement par barycentre (réduit les croisements).
-  col[0].sort((a,b)=>a.name.localeCompare(b.name));
+  // Workloads GROUPÉS par namespace (couloirs), puis triés par nom dans chaque groupe.
+  col[0].sort((a,b)=> (a.namespace||"").localeCompare(b.namespace||"") || a.name.localeCompare(b.name));
+  // Puis barycentre pour les colonnes suivantes (réduit les croisements).
   for (let c = 1; c < 4; c++) {
     const idx = {}; col[c-1].forEach((n,i)=>idx[n.id]=i);
     col[c].forEach(n => { const src=(inc[n.id]||[]).filter(id=>idx[id]!==undefined);
@@ -211,63 +232,117 @@ function renderFlow(graph, ns) {
     col[c].sort((a,b)=>(a._b-b._b)||a.name.localeCompare(b.name));
   }
 
-  // Géométrie (4 colonnes).
-  const scale = 7, minH = 16, gap = 7, headY = 26;
-  const W = Math.max(host.clientWidth || 1200, 1000);
-  const leftPad = 210, rightPad = 220, nodeW = 12, Mt = 40, Mb = 24;
+  // ---- Rendu premium (Workload → Pod → Service → Ingress) ----
+  const KCOL=k=> k==="Ingress" ? "#5b9bff"
+    : k==="Service" ? "#6b7688"
+    : k==="Pod" ? "#5fb3c9"
+    : k==="StatefulSet" ? "#8b5cf6"
+    : WKINDS.includes(k) ? "oklch(0.88 0.22 178.95)" : "#6b7688";
+  // scale = px par pod ; minH ≤ scale pour que la hauteur du nœud = l'épaisseur
+  // exacte de ses rubans (le carré/rectangle a la largeur du flux qui en part).
+  const scale = 12, minH = 8, gap = 13, headY = 24, nsGap = 26;
+  const W = Math.max(host.clientWidth || 1200, 1040);
+  const leftPad = 250, rightPad = 210, nodeW = 12, Mt = 46, Mb = 26;
   const colX = i => leftPad + ((W - leftPad - rightPad) / 3) * i;
 
-  const H = {}, colTot = [];
-  for (let c = 0; c < 4; c++) { let t = 0; for (const n of col[c]) { const h = Math.max(minH, (pv[n.id]||0)*scale); H[n.id]=h; t += h + gap; } colTot[c] = Math.max(0, t - gap); }
-  const maxTot = Math.max(1, ...colTot);
-  const pos = {};
-  for (let c = 0; c < 4; c++) { let y = Mt + (maxTot - colTot[c]) / 2; for (const n of col[c]) { pos[n.id] = { x: colX(c), y, h: H[n.id], col: c }; y += H[n.id] + gap; } }
-
-  // Bandes des rubans (val = pods qui coulent).
-  const outL = {}, inL = {};
+  const inSum = {}, outSum = {};
   for (const l of flinks) {
     const sk = byId[l.s].kind;
-    l.val = colOf(sk)===0 ? (pv[l.t]||1) : sk==="Service" ? (pv[l.s]||1) : 1;
-    (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l);
+    l.val = colOf(sk) === 0 ? (pv[l.t] || 1) : sk === "Service" ? (pv[l.s] || 1) : 1;
+    outSum[l.s] = (outSum[l.s] || 0) + l.val; inSum[l.t] = (inSum[l.t] || 0) + l.val;
   }
-  const alloc = (map, key, yKey) => {
+  const H = {};
+  for (let c = 0; c < 4; c++) for (const n of col[c]) H[n.id] = Math.max(minH, (inSum[n.id]||0)*scale, (outSum[n.id]||0)*scale);
+  // Hauteur colonne 0 = somme des nœuds + un espace supplémentaire à chaque changement de namespace.
+  const nsOf = n => n.namespace || "—";
+  let tot0 = 0, prev0 = null;
+  for (const n of col[0]) { if (prev0 !== null && nsOf(n) !== prev0) tot0 += nsGap; tot0 += H[n.id] + gap; prev0 = nsOf(n); }
+  tot0 = Math.max(0, tot0 - gap);
+  const colTot = [tot0];
+  for (let c = 1; c < 4; c++) { let t = 0; for (const n of col[c]) t += H[n.id] + gap; colTot[c] = Math.max(0, t - gap); }
+  const maxTot = Math.max(1, ...colTot);
+  const pos = {};
+  // Colonne 0 : positions groupées par namespace + repères de groupe (nom + séparateur).
+  const nsBands = [];
+  { let y = Mt + (maxTot - colTot[0]) / 2, prev = null, gTop = 0, gNs = null;
+    const flush = yEnd => { if (gNs !== null) nsBands.push({ ns: gNs, y0: gTop, y1: yEnd }); };
+    for (const n of col[0]) { const ns = nsOf(n);
+      if (prev !== null && ns !== prev) { flush(y - gap); y += nsGap; }
+      if (ns !== prev) { gTop = y; gNs = ns; }
+      pos[n.id] = { x: colX(0), y, h: H[n.id], col: 0 }; y += H[n.id] + gap; prev = ns;
+    }
+    flush(y - gap);
+  }
+  for (let c = 1; c < 4; c++) { let y = Mt + (maxTot - colTot[c]) / 2; for (const n of col[c]) { pos[n.id] = { x: colX(c), y, h: H[n.id], col: c }; y += H[n.id] + gap; } }
+
+  // Chaque côté d'un nœud est REMPLI par ses rubans (proportion de val). Un ruban a
+  // donc une largeur à sa source (remplit le nœud source) et une largeur à sa cible
+  // (remplit le nœud cible) : il colle au carré/rectangle aux DEUX bouts, même quand
+  // entrées et sorties ne s'équilibrent pas.
+  const outL = {}, inL = {};
+  for (const l of flinks) { (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l); }
+  const allocFill = (map, sortKey, pre) => {
     for (const id in map) { const arr = map[id], p = pos[id];
-      arr.sort((a,b)=>pos[a[key]].y - pos[b[key]].y);
-      const sum = arr.reduce((s,l)=>s+Math.max(1.5,l.val*scale),0);
-      let off = p.y + Math.max(0, (p.h - sum) / 2);
-      for (const l of arr) { const th = Math.max(1.5, l.val*scale); l[yKey+"0"]=off; l[yKey+"1"]=off+th; off+=th; }
+      arr.sort((a,b)=>pos[a[sortKey]].y - pos[b[sortKey]].y);
+      const sum = arr.reduce((s,l)=>s+l.val,0) || 1; let off = p.y;
+      for (const l of arr) { const th = p.h * l.val / sum; l[pre+"y"]=off; l[pre+"th"]=th; off+=th; }
     }
   };
-  alloc(outL, "t", "sy"); alloc(inL, "s", "ty");
+  allocFill(outL, "t", "s"); allocFill(inL, "s", "t");
 
-  // Est-ce un nœud "cassé" ? Service : sélecteur présent mais 0 pod. Ingress :
-  // 0 flux entrant. Un service SANS sélecteur (kubernetes, ExternalName…) n'est
-  // PAS cassé.
   const isBad = n => { const v = pv[n.id]||0;
     if (n.kind === "Service") return v === 0 && !n.noSelector;
-    if (n.kind === "Ingress") return v === 0;
-    return false; };
-  const isIdle = n => colOf(n.kind) === 0 && (pv[n.id]||0) === 0; // workload à 0 pod
+    if (n.kind === "Ingress") return v === 0; return false; };
+  const isIdle = n => colOf(n.kind) === 0 && (pv[n.id]||0) === 0;
 
   const svgH = Mt + maxTot + Mb;
-  const ribbon = (x0,ya0,yb0,x1,ya1,yb1,color) => { const xm=(x0+x1)/2;
-    return `<path d="M${x0},${ya0} C${xm},${ya0} ${xm},${ya1} ${x1},${ya1} L${x1},${yb1} C${xm},${yb1} ${xm},${yb0} ${x0},${yb0} Z" fill="${color}" fill-opacity="0.3"/>`; };
-  let s = `<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui" font-size="11">`;
-  for (let c = 0; c < 4; c++) s += `<text x="${colX(c)+nodeW/2}" y="${headY}" text-anchor="middle" fill="#8b949e" font-weight="600">${COLS[c]}</text>`;
-  for (const l of flinks) s += ribbon(pos[l.s].x+nodeW, l.sy0, l.sy1, pos[l.t].x, l.ty0, l.ty1, layerColor(byId[l.s].layer));
-  for (let c = 0; c < 4; c++) for (const n of col[c]) {
-    const p = pos[n.id], v = pv[n.id]||0;
-    const bad = isBad(n), idle = isIdle(n);
-    const cls = bad ? " class=\"bad\"" : idle ? " class=\"warn\"" : "";
-    const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
-    s += `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${layerColor(n.layer)}"${cls}><title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}${extra}</title></rect>`;
-    const tag = bad ? " ⚠︎0" : idle ? " ·0" : "";
-    const nsSuffix = ALL ? " · " + esc(n.namespace || "") : "";
-    const kindTag = colOf(n.kind)===0 && n.kind!=="Deployment" ? ` [${n.kind}]` : "";
-    if (c === 0) s += `<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" fill="${idle?'#e3b341':'#e6edf3'}">${esc(n.name)}${kindTag}${nsSuffix}${tag}</text>`;
-    else if (c === 2 || c === 3) s += `<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" fill="${bad?'#f85149':'#e6edf3'}">${esc(n.name)}${nsSuffix}${tag}</text>`;
+  const DIP="#202634", END="#66707f";
+  // ruban à largeur variable : ths à la source, tht à la cible.
+  const band=(x0,ys,ths,x1,yt,tht)=>{ const c=(x0+x1)/2;
+    return `M${x0},${ys} C${c},${ys} ${c},${yt} ${x1},${yt} L${x1},${yt+tht} C${c},${yt+tht} ${c},${ys+ths} ${x0},${ys+ths} Z`; };
+  const isSrc = id => !(inL[id] && inL[id].length);
+
+  let defs=`<filter id="fsoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`;
+  let rib="", nodes="", labels="", gi=0;
+  for (const l of flinks) { const P=pos[l.s], Q=pos[l.t], c0=KCOL(byId[l.s].kind), id="fg"+(gi++);
+    defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">`+
+      `<stop offset="0" stop-color="${c0}" stop-opacity=".8"/>`+
+      `<stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/>`+
+      `<stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
+    rib+=`<path d="${band(P.x+nodeW-1, l.sy, l.sth, Q.x+2, l.ty, l.tth)}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
   }
-  s += `</svg>`;
+  for (let c = 0; c < 4; c++) for (const n of col[c]) {
+    const p = pos[n.id], v = pv[n.id]||0, bad = isBad(n), idle = isIdle(n);
+    const cap = bad ? "#ef4444" : idle ? "#e0a94a" : KCOL(n.kind);
+    const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
+    const ttl = `<title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}${extra}</title>`;
+    if (isSrc(n.id) && c===0 && !bad && !idle) {
+      const gid="fsrc"+n.id.replace(/[^a-zA-Z0-9]/g,"");
+      defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
+      nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="4" fill="url(#${gid})" stroke="rgba(255,255,255,.1)">${ttl}</rect>`;
+      nodes+=`<rect x="${p.x+nodeW-2.5}" y="${p.y}" width="2.5" height="${p.h}" rx="1.5" fill="${cap}" filter="url(#fsoft)"/>`;
+      nodes+=`<rect x="${p.x+nodeW-1.5}" y="${p.y+1}" width="1.5" height="${p.h-2}" fill="#eef3fb"/>`;
+    } else {
+      const glow = bad ? ' filter="url(#fsoft)"' : '';
+      nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}"${glow}>${ttl}</rect>`;
+    }
+    const tag = bad ? " ⚠" : idle ? " ·0" : "";
+    const nsSuffix = ALL ? " · " + esc(n.namespace || "") : "";
+    const kindTag = c===0 && n.kind!=="Deployment" ? ` [${esc(n.kind)}]` : "";
+    // col 0 : le namespace est porté par l'en-tête de groupe → pas de suffixe ici.
+    if (c === 0) labels+=`<text x="${p.x-9}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="12" font-weight="600" fill="${idle?'#e0a94a':bad?'#ef4444':'#e9edf3'}">${esc(n.name)}${kindTag}${tag}</text>`;
+    else if (c === 2 || c === 3) labels+=`<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" font-size="11.5" font-weight="500" fill="${bad?'#ef4444':'#e9edf3'}" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${nsSuffix}${tag}</text>`;
+  }
+  // En-têtes de namespace (couloirs) au-dessus de chaque groupe de workloads.
+  let nsHdr="";
+  for (const bnd of nsBands) {
+    nsHdr += `<line x1="6" y1="${(bnd.y0-5).toFixed(1)}" x2="${leftPad+nodeW}" y2="${(bnd.y0-5).toFixed(1)}" stroke="rgba(255,255,255,.07)"/>`;
+    nsHdr += `<text x="${leftPad-9}" y="${(bnd.y0-9).toFixed(1)}" text-anchor="end" font-size="10.5" font-weight="700" letter-spacing="0.5" fill="#8ea2c0">${esc(bnd.ns).toUpperCase()}</text>`;
+  }
+  let s = `<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
+  s+=`<defs>${defs}</defs>`;
+  for (let c = 0; c < 4; c++) s += `<text x="${colX(c)+nodeW/2}" y="${headY}" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${COLS[c].toUpperCase()}</text>`;
+  s += nsHdr+rib+nodes+labels+`</svg>`;
   host.innerHTML = s;
 
   // Résumé.
@@ -290,22 +365,50 @@ function renderOverview(nodes) {
   for (const n of nodes) { const ns=n.namespace||"cluster-scoped"; nsCount[ns]=(nsCount[ns]||0)+1; (nsKind[ns]=nsKind[ns]||{})[n.kind]=(nsKind[ns][n.kind]||0)+1; }
   const total = nodes.length;
   const nsList = Object.keys(nsCount).sort((a,b)=>nsCount[b]-nsCount[a]);
-  const palette = ["#58a6ff","#3fb950","#bc8cff","#f0883e","#39c5cf","#e3b341","#f85149","#db61a2","#7ee787","#a5d6ff","#ffa657","#d2a8ff","#56d364","#e2c08d"];
+  // Palette premium (teintes profondes, pas de fluo).
+  const palette = ["#5b9bff","#22c55e","#8b5cf6","#e0a94a","#5fb3c9","#ef6b6b","#d478c4","#38bdf8","#34d399","#a78bfa","#f0883e","#2dd4bf","#818cf8","#f472b6"];
   const nsColor = {}; nsList.forEach((ns,i)=>nsColor[ns]=palette[i%palette.length]);
-  const perObj=3.2, minK=15, gapK=2, gapNs=12, nodeW=13;
-  const W = Math.max(host.clientWidth||1000, 700), xC=110, xN=300, xK=W-210, Mt=18;
+  const perObj=3.4, minK=13, gapK=3, gapNs=16, nodeW=13, Mt=40, Mb=26;
+  const W = Math.max(host.clientWidth||1100, 900);
+  const xC = 150, xK = W - 240, xN = xC + (xK - xC) * 0.42;
   const kindPos={}, nsPos={}; let y=Mt;
   for (const ns of nsList) { kindPos[ns]={}; const ks=Object.keys(nsKind[ns]).sort((a,b)=>nsKind[ns][b]-nsKind[ns][a]); const sy=y;
     ks.forEach((k,i)=>{ const h=Math.max(minK,nsKind[ns][k]*perObj); kindPos[ns][k]={y,h}; y+=h+(i<ks.length-1?gapK:0); }); nsPos[ns]={y:sy,h:y-sy}; y+=gapNs; }
-  const totalH=y-gapNs, H=totalH+Mt+18, clY=Mt, clH=totalH;
-  const ribbon=(x0,ya0,yb0,x1,ya1,yb1,color)=>{const xm=(x0+x1)/2;return `<path d="M${x0},${ya0} C${xm},${ya0} ${xm},${ya1} ${x1},${ya1} L${x1},${yb1} C${xm},${yb1} ${xm},${yb0} ${x0},${yb0} Z" fill="${color}" fill-opacity="0.25"/>`;};
-  let s=`<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" font-family="system-ui" font-size="11">`;
-  for (const ns of nsList){const p=nsPos[ns]; s+=ribbon(xC+nodeW,p.y,p.y+p.h,xN,p.y,p.y+p.h,nsColor[ns]);}
-  for (const ns of nsList) for (const k of Object.keys(kindPos[ns])){const kp=kindPos[ns][k]; s+=ribbon(xN+nodeW,kp.y,kp.y+kp.h,xK,kp.y,kp.y+kp.h,nsColor[ns]);}
-  s+=`<rect x="${xC}" y="${clY}" width="${nodeW}" height="${clH}" rx="3" fill="#6e7681"/><text x="${xC-8}" y="${clY+12}" text-anchor="end" fill="#e6edf3" font-weight="700">Cluster</text><text x="${xC-8}" y="${clY+27}" text-anchor="end" fill="#8b949e">${esc(cluster)} · ${total}</text>`;
-  for (const ns of nsList){const p=nsPos[ns]; s+=`<rect x="${xN}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${nsColor[ns]}"/><text x="${xN-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" fill="#e6edf3">${esc(ns)} · ${nsCount[ns]}</text>`;}
-  for (const ns of nsList) for (const k of Object.keys(kindPos[ns])){const kp=kindPos[ns][k]; s+=`<rect x="${xK}" y="${kp.y}" width="${nodeW}" height="${kp.h}" rx="3" fill="${nsColor[ns]}"/><text x="${xK+nodeW+6}" y="${kp.y+kp.h/2}" dominant-baseline="middle" fill="#c9d1d9">${esc(k)} · ${nsKind[ns][k]}</text>`;}
-  s+=`</svg>`; host.innerHTML=s;
+  const svgH=y-gapNs+Mb, clY=Mt, clH=y-gapNs-Mt;
+  const DIP="#171a21", END="#5a6373";
+  // ruban tube à largeur variable (remplit chaque nœud aux deux bouts).
+  const band=(x0,ys,ths,x1,yt,tht)=>{ const c=(x0+x1)/2;
+    return `M${x0},${ys} C${c},${ys} ${c},${yt} ${x1},${yt} L${x1},${yt+tht} C${c},${yt+tht} ${c},${ys+ths} ${x0},${ys+ths} Z`; };
+  let defs=`<filter id="osoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`, rib="", nds="", labels="", gi=0;
+  const grad=c0=>{ const id="og"+(gi++); defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${c0}" stop-opacity=".62"/><stop offset=".42" stop-color="${DIP}" stop-opacity=".26"/><stop offset="1" stop-color="${END}" stop-opacity=".46"/></linearGradient>`; return id; };
+  // Cluster → Namespace : remplit le cluster (part du count) à gauche, remplit le ns (sa hauteur) à droite.
+  let coff=clY;
+  for (const ns of nsList){ const p=nsPos[ns], cth=clH*nsCount[ns]/total, id=grad(nsColor[ns]);
+    rib+=`<path d="${band(xC+nodeW-1, coff, cth, xN+2, p.y, p.h)}" fill="url(#${id})"><title>${esc(ns)} · ${nsCount[ns]}</title></path>`; coff+=cth; }
+  // Namespace → Type : remplit le ns (part de chaque kind) et le kind (sa hauteur).
+  for (const ns of nsList){ const p=nsPos[ns]; let noff=p.y;
+    for (const k of Object.keys(kindPos[ns])){ const kp=kindPos[ns][k], nth=p.h*nsKind[ns][k]/nsCount[ns], id=grad(nsColor[ns]);
+      rib+=`<path d="${band(xN+nodeW-1, noff, nth, xK+2, kp.y, kp.h)}" fill="url(#${id})"><title>${esc(k)} · ${nsKind[ns][k]}</title></path>`; noff+=nth; } }
+  // Cluster = barre slate + liseré lumineux.
+  defs+=`<linearGradient id="oclu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
+  nds+=`<rect x="${xC}" y="${clY}" width="${nodeW}" height="${clH}" rx="4" fill="url(#oclu)" stroke="rgba(255,255,255,.1)"/>`;
+  nds+=`<rect x="${xC+nodeW-2.5}" y="${clY}" width="2.5" height="${clH}" rx="1.5" fill="#6ea8fe" filter="url(#osoft)"/>`;
+  nds+=`<rect x="${xC+nodeW-1.5}" y="${clY+1}" width="1.5" height="${clH-2}" fill="#eef3fb"/>`;
+  labels+=`<text x="${xC-9}" y="${clY+13}" text-anchor="end" font-weight="700" font-size="12" fill="#e9edf3">${esc(cluster)}</text>`;
+  labels+=`<text x="${xC-9}" y="${clY+28}" text-anchor="end" font-size="10" font-family="'IBM Plex Mono',monospace" fill="#565f70">${total} objets</text>`;
+  for (const ns of nsList){ const p=nsPos[ns];
+    nds+=`<rect x="${xN}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${nsColor[ns]}"/>`;
+    labels+=`<text x="${xN-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(ns)} · ${nsCount[ns]}</text>`; }
+  for (const ns of nsList) for (const k of Object.keys(kindPos[ns])){ const kp=kindPos[ns][k];
+    nds+=`<rect x="${xK}" y="${kp.y}" width="${nodeW}" height="${kp.h}" rx="2.5" fill="${nsColor[ns]}"/>`;
+    labels+=`<text x="${xK+nodeW+6}" y="${kp.y+kp.h/2}" dominant-baseline="middle" font-size="11" fill="#c9d1d9" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(k)} · ${nsKind[ns][k]}</text>`; }
+  let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
+  s+=`<defs>${defs}</defs>`;
+  s+=`<text x="${(xC+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">CLUSTER</text>`;
+  s+=`<text x="${(xN+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">NAMESPACES</text>`;
+  s+=`<text x="${(xK+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">TYPES</text>`;
+  s+=rib+nds+labels+`</svg>`;
+  host.innerHTML=s;
   setStatus(`${total} objets · ${nsList.length} namespaces`);
 }
 
@@ -332,7 +435,16 @@ const cy = cytoscape({
     { selector:".faded", style:{ "opacity":0.12, "text-opacity":0 }},
   ],
 });
-window.addEventListener("resize", () => cy.resize());
+// Re-rendu (débattu) au redimensionnement de la fenêtre : les schémas se recalculent
+// à la nouvelle largeur du conteneur.
+let _rzT;
+window.addEventListener("resize", () => { cy.resize();
+  clearTimeout(_rzT); _rzT = setTimeout(() => { const m = document.body.dataset.mode;
+    if (m === "flow" && gGraph) renderFlow(gGraph, el("ns-picker").value);
+    else if (m === "interactions" && gGraph) renderInteractions(gGraph);
+    else if (m === "overview" && gNodes) renderOverview(gNodes);
+  }, 180);
+});
 let maxDegree = 0;
 const uidOf = n => { const id=n.data("id"); return id.slice(n.data("cluster").length+1); };
 function relayout(){ cy.layout({ name:"concentric", concentric:n=>maxDegree-(n.data("degree")??maxDegree)+1, levelWidth:()=>1, minNodeSpacing:55, animate:true, animationDuration:350, avoidOverlap:true }).run(); }
@@ -358,92 +470,202 @@ el("zin").onclick=()=>cy.zoom({level:cy.zoom()*1.3,renderedPosition:{x:cy.width(
 el("zout").onclick=()=>cy.zoom({level:cy.zoom()/1.3,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
 el("zfit").onclick=()=>cy.fit(cy.elements(),40);
 
-/* =================== INTERACTIONS — « qui parle à qui » =================== */
-const cyInt = cytoscape({ container: el("cyint"), minZoom:0.2, maxZoom:3, wheelSensitivity:0.25, style:[
-  { selector:"node", style:{ "background-color":e=>layerColor(e.data("layer")), "width":26, "height":26, "border-width":0,
-    "label":e=>e.data("label"), "font-size":10, "color":"#e6edf3", "text-valign":"bottom", "text-margin-y":5,
-    "text-background-color":"#161b22", "text-background-opacity":0.9, "text-background-shape":"roundrectangle", "text-background-padding":3, "min-zoomed-font-size":6 }},
-  // Défaut = déclaré seul (config, jamais observé) : orange pointillé.
-  { selector:"edge", style:{ "width":2, "line-color":"#f0883e", "target-arrow-color":"#f0883e", "target-arrow-shape":"triangle",
-    "curve-style":"bezier", "line-style":"dashed", "label":"", "font-size":8, "color":"#e6edf3", "text-rotation":"autorotate",
-    "text-background-color":"#161b22", "text-background-opacity":0.9, "text-background-padding":2 }},
-  // Confirmé (configuré ET observé) : vert plein.
-  { selector:'edge[state="both"]', style:{ "line-color":"#3fb950", "target-arrow-color":"#3fb950", "line-style":"solid" }},
-  // Observé mais NON déclaré (trafic surprise = signal sécu) : rouge plein.
-  { selector:'edge[state="talks"]', style:{ "line-color":"#f85149", "target-arrow-color":"#f85149", "line-style":"solid", "width":2.5 }},
-  { selector:"edge.hl", style:{ "label":"data(label)", "width":3.5 }},
-  { selector:".faded", style:{ "opacity":0.1 }},
-]});
-window.addEventListener("resize", ()=>cyInt.resize());
-cyInt.on("mouseover","node",e=>{ const nb=e.target.closedNeighborhood(); cyInt.elements().addClass("faded"); nb.removeClass("faded"); nb.edges().addClass("hl"); });
-cyInt.on("mouseout","node",()=>cyInt.elements().removeClass("faded hl"));
-
-// Services d'infra ubiquitaires : « tout le monde parle à l'API et au DNS »
-// n'apporte rien et noie le graphe. On les masque de la vue des interactions.
+/* =================== INTERACTIONS — Sankey en couloirs « qui parle à qui » =================== */
+// Services d'infra ubiquitaires (API, DNS) et namespaces d'infra : « tout le
+// monde parle à l'API et se fait scraper par prometheus » noie le graphe.
 const INFRA_SVC = new Set(["kubernetes","kube-dns","coredns"]);
+const INFRA_NS = new Set(["kube-system","calico-system","calico-apiserver","tigera-operator","monitoring","keda"]);
 
 function renderInteractions(graph){
   const byId={}; for(const n of graph.nodes) byId[n.id]=n;
   const ownerOf={}; for(const e of graph.edges) if(e.type==="OWNED_BY") ownerOf[e.source]=e.target;
   const top=id=>{let c=ownerOf[id],g=0;while(c&&g++<12){const k=byId[c]&&byId[c].kind;if(WKINDS.includes(k))return c;c=ownerOf[c];}return null;};
-  // Service -> workload qui le backe (via SELECTS -> pod -> contrôleur de tête).
   const svcWl={}; for(const e of graph.edges) if(e.type==="SELECTS"){ const w=top(e.target); if(w&&!svcWl[e.source]) svcWl[e.source]=w; }
-  // Agrège par couple (from->to) : configuré (USES) et/ou observé (TALKS_TO).
-  const nodeSet=new Set(), pairs={};
+  const resolveWl=id=>{ const n=byId[id]; if(!n) return null; if(n.kind==="Service") return svcWl[id]||id; if(WKINDS.includes(n.kind)) return id; return top(id)||id; };
+  const hideInfra = el("hide-infra").checked;
+  const okNs = id => !hideInfra || !INFRA_NS.has(byId[id].namespace);
+
+  // On assemble UNE seule carte : entrée (ingress→service→workload) + interactions.
+  const nodeSet=new Set(), edges=[];
+  // 1) Entrée : Ingress -> Service.
+  const entrySvc=new Set();
+  for(const e of graph.edges){ if(e.type!=="ROUTES_TO") continue;
+    const ing=e.source, svc=e.target; if(!byId[ing]||!byId[svc]||!okNs(ing)||!okNs(svc)) continue;
+    entrySvc.add(svc); nodeSet.add(ing); nodeSet.add(svc); edges.push({from:ing,to:svc,kind:"entry"}); }
+  // 2) Service (d'entrée) -> Workload qui le sert.
+  for(const e of graph.edges){ if(e.type!=="SELECTS"||!entrySvc.has(e.source)) continue;
+    const w=top(e.target); if(!w||!byId[w]||!okNs(w)) continue; nodeSet.add(w); edges.push({from:e.source,to:w,kind:"backs"}); }
+  // 3) Interactions : Workload -> Service de dépendance -> Workload cible (avec état).
+  //    On GARDE le service intermédiaire visible (comme le croquis) : button-app → llm-svc → llm.
+  //    Si la cible n'a pas de service (accès direct à un StatefulSet), on relie le workload directement.
+  const pairs={}, backsDep=new Set();
   for(const e of graph.edges){ if(e.type!=="USES"&&e.type!=="TALKS_TO") continue;
-    const tgt=byId[e.target];
-    if(tgt && tgt.kind==="Service" && INFRA_SVC.has(tgt.name)) continue; // filtre infra
-    const from=e.source, to=svcWl[e.target]||e.target;
-    if(from===to||!byId[from]||!byId[to]) continue;
+    const tgt=byId[e.target]; if(tgt&&tgt.kind==="Service"&&INFRA_SVC.has(tgt.name)) continue;
+    const from=resolveWl(e.source); if(!from||!byId[from]||!okNs(from)) continue;
+    let depSvc=null, depWl=null;
+    if(tgt&&tgt.kind==="Service"){ depSvc=e.target; depWl=svcWl[e.target]||null; }
+    else { depWl=resolveWl(e.target); }
+    const to = depSvc || depWl;
+    if(!to||from===to||!byId[to]||!okNs(to)) continue;
     nodeSet.add(from); nodeSet.add(to);
-    const key=from+"__"+to; const p=pairs[key]||(pairs[key]={from,to,uses:false,talks:false});
-    if(e.type==="USES") p.uses=true; else p.talks=true;
+    const k=from+"__"+to; const p=pairs[k]||(pairs[k]={from,to,uses:false,talks:false}); if(e.type==="USES")p.uses=true; else p.talks=true;
+    if(depSvc&&depWl&&depWl!==depSvc&&byId[depWl]&&okNs(depWl)){ nodeSet.add(depWl); backsDep.add(depSvc+"__"+depWl); }
   }
-  const list=Object.values(pairs);
-  const empty=el("int-empty");
-  if(!list.length){ cyInt.elements().remove(); empty.style.display="block";
-    empty.innerHTML="Aucune interaction détectée.<br>Config : tes apps ne référencent peut-être pas les services par nom DNS. Trafic : l'agent conntrack n'a rien poussé (lance <code>go run ./cmd/agent</code> sur le nœud).";
-    setStatus("0 interaction"); return; }
-  empty.style.display="none";
-  const els=[];
-  for(const id of nodeSet){ const n=byId[id]; els.push({group:"nodes",data:{id,label:`${n.kind}/${n.name}`,layer:n.layer}}); }
+  // Une base DÉCLARÉE existe-t-elle ? (au moins un USES quelque part) Sans elle, on ne
+  // peut PAS qualifier un trafic observé de « dérive » : tout serait faux-rouge.
+  const declaredBaseline = Object.values(pairs).some(p=>p.uses);
   let nBoth=0,nUses=0,nTalks=0;
-  for(const p of list){
-    const state = p.uses&&p.talks ? "both" : p.talks ? "talks" : "uses";
-    const label = state==="both" ? "confirmé" : state==="talks" ? "⚠ non déclaré" : "déclaré";
-    if(state==="both")nBoth++; else if(state==="talks")nTalks++; else nUses++;
-    els.push({group:"edges",data:{id:p.from+"__"+p.to,source:p.from,target:p.to,state,label}});
+  for(const p of Object.values(pairs)){ const st=p.uses&&p.talks?"both":p.talks?"talks":"uses";
+    if(st==="both")nBoth++; else if(st==="talks")nTalks++; else nUses++; edges.push({from:p.from,to:p.to,kind:"call",state:st}); }
+  for(const bp of backsDep){ const i=bp.lastIndexOf("__"); edges.push({from:bp.slice(0,i),to:bp.slice(i+2),kind:"backs"}); }
+
+  const host=el("cyint"), empty=el("int-empty");
+  if(!edges.length){ host.innerHTML=""; empty.style.display="block";
+    empty.innerHTML="Carte vide. Vérifie que l'agent conntrack tourne, ou décoche « masquer l'infra »."; setStatus("carte vide"); return; }
+  empty.style.display="none";
+  const ids=[...nodeSet];
+
+  // Couches par plus long chemin : entrée à gauche, dépendances (kafka/minio…) à droite.
+  const layer={}; ids.forEach(id=>layer[id]=0);
+  for(let it=0; it<ids.length; it++){ let ch=false;
+    for(const e of edges){ if(layer[e.to] < layer[e.from]+1){ layer[e.to]=layer[e.from]+1; ch=true; } } if(!ch) break; }
+  const maxL=Math.max(0,...ids.map(id=>layer[id]));
+  const cols=Array.from({length:maxL+1},()=>[]);
+  for(const id of ids) cols[layer[id]].push(id);
+  // Ordonnancement par barycentre (réduit les croisements de rubans).
+  if(cols[0]) cols[0].sort((a,b)=>byId[a].name.localeCompare(byId[b].name));
+  const inAdj={}; for(const e of edges){ (inAdj[e.to]=inAdj[e.to]||[]).push(e.from); }
+  for(let l=1;l<cols.length;l++){ const idx={}; cols[l-1].forEach((id,i)=>idx[id]=i);
+    cols[l].forEach(id=>{ const src=(inAdj[id]||[]).filter(s=>idx[s]!==undefined);
+      byId[id]._b = src.length ? src.reduce((a,s)=>a+idx[s],0)/src.length : 1e9; });
+    cols[l].sort((a,b)=>(byId[a]._b-byId[b]._b)||byId[a].name.localeCompare(byId[b].name)); }
+
+  // ---- Rendu premium : Sankey en « tube » (couleur = kind du nœud source → gris) ----
+  // Couleur par kind du nœud.
+  const KCOL=k=> k==="Ingress" ? "#5b9bff"
+    : k==="Service" ? "#6b7688"
+    : k==="StatefulSet" ? "#8b5cf6"
+    : WKINDS.includes(k) ? "oklch(0.88 0.22 178.95)" : "#6b7688";
+
+  // Carte de RELATIONS (pas de volume) : nœuds de taille uniforme, rubans d'épaisseur
+  // constante ≈ hauteur du nœud. Chaque ruban relie le centre du nœud source au centre
+  // du nœud cible → sa largeur colle au carré/rectangle d'où il part. Les liens d'un
+  // même nœud se regroupent au nœud puis s'éventaillent vers leurs cibles.
+  const H0=17, TH=13, gap=22, nodeW=13, Mt=46, Mb=30, leftPad=150, rightPad=150, colW=210;
+  const W=Math.max(host.clientWidth||1200, leftPad+rightPad+maxL*colW+nodeW+40);
+  const colX=l=> leftPad + colW*l;
+  const colH=cols.map(c=>Math.max(0,c.length*(H0+gap)-gap));
+  const maxColH=Math.max(H0,...colH);
+  const pos={};
+  cols.forEach((c,l)=>{ let y=Mt+(maxColH-colH[l])/2; for(const id of c){ pos[id]={x:colX(l),y,h:H0}; y+=H0+gap; } });
+  const svgH=Mt+Mb+maxColH;
+
+  const inB={}; for(const e of edges){ (inB[e.to]=inB[e.to]||[]).push(e); }
+  for(const e of edges){ e.sy = pos[e.from].y+(H0-TH)/2; e.ty = pos[e.to].y+(H0-TH)/2; }
+
+  // Dérive RÉELLE = trafic observé non déclaré, MAIS seulement si une base déclarée
+  // existe (sinon « observé » neutre = couleur du nœud source). Déclaré-non-observé = ambre.
+  const isDrift = e => e.kind==="call" && e.state==="talks" && declaredBaseline;
+  const ribColor=e=> isDrift(e) ? "#ef4444"
+    : (e.kind==="call"&&e.state==="uses") ? "#e0a94a"
+    : KCOL(byId[e.from].kind);
+  const ribOp=e=> (e.kind==="call"&&e.state==="uses") ? [.36,.24,.34]
+    : isDrift(e) ? [.78,.5,.6]
+    : [.78,.5,.58];
+  const DIP="#202634", END="#66707f";
+  const isSource=id=> !(inB[id]&&inB[id].length);
+  const band=(x0,y0,x1,y1,th)=>{ const c=(x0+x1)/2;
+    return `M${x0},${y0} C${c},${y0} ${c},${y1} ${x1},${y1} L${x1},${y1+th} C${c},${y1+th} ${c},${y0+th} ${x0},${y0+th} Z`; };
+
+  let defs=`<filter id="isoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`;
+  let rib="", nodes="", labels="", gi=0;
+  for(const e of edges){
+    const P=pos[e.from], Q=pos[e.to], c0=ribColor(e), op=ribOp(e), id="ig"+(gi++);
+    defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0">`+
+      `<stop offset="0" stop-color="${c0}" stop-opacity="${op[0]}"/>`+
+      `<stop offset=".42" stop-color="${DIP}" stop-opacity="${op[1]}"/>`+
+      `<stop offset="1" stop-color="${END}" stop-opacity="${op[2]}"/></linearGradient>`;
+    const glow=''; // plus de flou sur les rubans : ils restent nets
+    rib+=`<path d="${band(P.x+nodeW-1, e.sy, Q.x+2, e.ty, TH)}" fill="url(#${id})"${glow}><title>${esc(byId[e.from].name)} → ${esc(byId[e.to].name)}</title></path>`;
   }
-  cyInt.elements().remove(); cyInt.add(els);
-  cyInt.layout({name:"cose",animate:true,animationDuration:500,nodeRepulsion:8000,idealEdgeLength:120,padding:40}).run();
-  let msg=`${nodeSet.size} composants · ${nBoth} confirmés, ${nUses} déclarés seuls`;
-  if(nTalks) msg+=` · ${nTalks} NON déclarés ⚠`;
+  for(const id of ids){ const P=pos[id], n=byId[id], c=KCOL(n.kind);
+    if(isSource(id)){
+      const gid="isrc"+id.replace(/[^a-zA-Z0-9]/g,"");
+      defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
+      nodes+=`<rect x="${P.x}" y="${P.y}" width="${nodeW}" height="${P.h}" rx="4" fill="url(#${gid})" stroke="rgba(255,255,255,.1)"><title>${esc(n.kind)}/${esc(n.name)} · ${esc(n.namespace||"")}</title></rect>`;
+      nodes+=`<rect x="${P.x+nodeW-2.5}" y="${P.y}" width="2.5" height="${P.h}" rx="1.5" fill="${c}" filter="url(#isoft)"/>`;
+      nodes+=`<rect x="${P.x+nodeW-1.5}" y="${P.y+1}" width="1.5" height="${P.h-2}" fill="#eef3fb"/>`;
+    } else {
+      nodes+=`<rect x="${P.x}" y="${P.y}" width="${nodeW}" height="${P.h}" rx="2.5" fill="${c}"><title>${esc(n.kind)}/${esc(n.name)} · ${esc(n.namespace||"")}</title></rect>`;
+    }
+    // Désambiguïsation : le kind (et le namespace) accompagnent le nom — un « website »
+    // Ingress ≠ Service ≠ Deployment doivent se distinguer au premier coup d'œil.
+    const cx=P.x+nodeW/2, ly=P.y-9, nm=esc(n.name);
+    const kindLbl=esc(n.kind.toLowerCase()), nsLbl=esc(n.namespace||"");
+    if(layer[id]===0){
+      labels+=`<text x="${P.x-11}" y="${P.y+P.h/2-1}" text-anchor="end" fill="#e9edf3" font-weight="600" font-size="12">${nm}</text>`;
+      labels+=`<text x="${P.x-11}" y="${P.y+P.h/2+12}" text-anchor="end" fill="#565f70" font-size="9" font-family="'IBM Plex Mono',monospace">${kindLbl}${nsLbl?" · "+nsLbl:""}</text>`;
+    } else {
+      const suffix=" · "+kindLbl, wpx=(nm.length+suffix.length)*6.6+18;
+      labels+=`<rect x="${(cx-wpx/2).toFixed(1)}" y="${ly-13}" width="${wpx.toFixed(1)}" height="17" rx="5" fill="rgba(8,10,16,.85)" stroke="rgba(255,255,255,.09)"/>`;
+      labels+=`<text x="${cx.toFixed(1)}" y="${ly-1}" text-anchor="middle" font-size="12"><tspan fill="#e9edf3" font-weight="600">${nm}</tspan><tspan fill="#8ea2c0" font-weight="400">${suffix}</tspan></text>`;
+    }
+  }
+  let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
+  s+=`<defs>${defs}</defs>`;
+  s+=`<text x="${leftPad-2}" y="24" fill="#565f70" font-size="11" font-weight="600">← apps / entrée</text>`;
+  s+=`<text x="${W-rightPad}" y="24" fill="#565f70" font-size="11" font-weight="600" text-anchor="end">dépendances appelées →</text>`;
+  s+=rib+nodes+labels+`</svg>`;
+  host.innerHTML=s;
+
+  const nIng=ids.filter(id=>byId[id].kind==="Ingress").length;
+  let msg=`${ids.length} composants · ${nIng} entrée(s)`;
+  if(declaredBaseline){
+    msg+=` · ${nBoth} confirmés`;
+    if(nUses) msg+=`, ${nUses} déclarés seuls`;
+    if(nTalks) msg+=` · ${nTalks} dérive(s) ⚠`;
+  } else {
+    // Pas de base déclarée : on ne parle pas de dérive, juste de trafic observé.
+    msg+=` · ${nTalks+nBoth} appels observés · aucune config déclarée (pas de comparatif dérive)`;
+  }
   setStatus(msg);
 }
 
 /* =================== Bascule =================== */
-async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions");
-  el("hint").innerHTML="Interactions — qui parle à qui. <b style='color:#f0883e'>Orange pointillé</b> = déclaré (config, jamais observé). <b style='color:#3fb950'>Vert</b> = confirmé (configuré ET observé). <b style='color:#f85149'>Rouge</b> = observé mais NON déclaré (trafic surprise, signal sécu). Survole une arête pour son état.";
-  try { renderInteractions(await ensureGraph()); cyInt.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
-async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow");
-  el("hint").textContent="Flux — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
+async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
+  el("hint").innerHTML="Carte du cluster — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source et finit en gris. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré mais non observé</b> · <b style='color:#ef4444'>rouge=dérive</b> (observé non déclaré, <i>uniquement si une config déclarée existe</i>).";
+  try { renderInteractions(await ensureGraph()); } catch(e){ setStatus("API injoignable : "+e.message); } }
+async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow"); setLegend(KIND_LEGEND);
+  el("hint").textContent="Flux — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Couleur = kind. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
   try { const g=await ensureGraph(); fillNsPicker(g); renderFlow(g, el("ns-picker").value); }
   catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
+  setLegend('<span class="chip" style="color:var(--muted)">Couleur = namespace · hauteur = nombre d\'objets</span>');
   el("hint").textContent="Vue d'ensemble — Cluster → Namespaces → Types. La hauteur = le nombre d'objets.";
   try { renderOverview(await ensureNodes()); } catch(e){ setStatus("API injoignable : "+e.message); } }
-async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore");
+async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore"); setLegend(LAYER_LEGEND);
   el("hint").textContent="Explorer — choisis un départ puis Charger. Survole pour isoler les liens, clique pour le détail et déplier le cercle suivant.";
   try { fillPicker(await ensureNodes()); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
 function setTab(m){ for (const t of ["flow","interactions","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
 el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
 el("ns-picker").onchange=()=>{ if(gGraph) renderFlow(gGraph, el("ns-picker").value); };
+el("hide-infra").onchange=()=>{ if(gGraph) renderInteractions(gGraph); };
 el("refresh").onclick=async()=>{ gGraph=null; gNodes=null;
   const m=document.body.dataset.mode;
   if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="overview") showOverviewTab(); else showExplore(); };
-el("legend").innerHTML = Object.values(LAYER).map(l=>`<span class="chip"><span class="dot" style="background:${l.color}"></span>${l.label}</span>`).join("") + `<span class="chip" style="margin-left:8px"><span class="dot" style="background:var(--bad)"></span>0 pod / cassé</span>`;
+// Légende contextuelle : Flux/Carte affichent le vrai code couleur par KIND (+ statut) ;
+// Vue d'ensemble / Explorer gardent le code par couche.
+const chip = (c,l) => `<span class="chip"><span class="dot" style="background:${c}"></span>${l}</span>`;
+const LAYER_LEGEND = Object.values(LAYER).map(l=>chip(l.color,l.label)).join("") + chip("#ef4444","0 pod / cassé");
+const KIND_LEGEND =
+  chip("oklch(0.88 0.22 178.95)","Deployment / workload") + chip("#8b5cf6","StatefulSet / base") +
+  chip("#5fb3c9","Pod") + chip("#6b7688","Service") + chip("#5b9bff","Ingress") +
+  `<span class="chip" style="margin-left:10px"><span class="dot" style="background:#e0a94a"></span>0 pod / idle</span>` +
+  chip("#ef4444","cassé / dérive");
+const setLegend = html => { el("legend").innerHTML = html; };
+setLegend(KIND_LEGEND);
 
-showFlow();
+showInteractions();
 </script>
 </body>
 </html>
