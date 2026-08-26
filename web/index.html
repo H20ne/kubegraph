@@ -100,6 +100,28 @@
   .sev-tag { align-self:start; font-size:10.5px; font-weight:800; letter-spacing:.4px; text-transform:uppercase;
     padding:3px 8px; border-radius:20px; color:#08090c; white-space:nowrap; }
   #sec-empty { color:var(--muted); font-size:13px; padding:24px 4px; }
+  /* Curseur main sur les nœuds cliquables en mode sécu. */
+  body.secmode #flow [data-node], body.secmode #cyint [data-node], body.secmode #access [data-node] { cursor:pointer; }
+  /* Panneau latéral de détail d'un finding (mode sécu). */
+  #sec-panel { position:absolute; top:0; right:0; bottom:0; width:380px; max-width:86vw; z-index:20;
+    background:#0d1117; border-left:1px solid rgba(255,255,255,.09); box-shadow:-16px 0 40px -24px #000;
+    overflow-y:auto; padding:16px 18px 32px; display:none; }
+  #sec-panel.open { display:block; }
+  #sec-panel-x { position:absolute; top:12px; right:12px; width:30px; height:30px; padding:0; font-size:14px;
+    background:rgba(255,255,255,.04); border-radius:8px; }
+  .sp-kind { font-size:11px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:#7b8798; }
+  .sp-name { font-size:17px; font-weight:700; color:#e9edf3; margin:2px 0 2px; word-break:break-word; }
+  .sp-ns { font-size:12px; color:#8ea2c0; margin-bottom:14px; }
+  .sp-f { border:1px solid rgba(255,255,255,.08); border-radius:10px; padding:11px 13px 13px; margin-bottom:12px; }
+  .sp-f h4 { margin:0 0 4px; font-size:13.5px; font-weight:700; color:#e9edf3; }
+  .sp-f .why { font-size:12.5px; color:#aeb8c6; line-height:1.5; }
+  .sp-f .ref { font-size:11px; color:#6b7688; margin-top:6px; }
+  .sp-reco { margin-top:9px; font-size:12.5px; color:#bfe6cf; line-height:1.5; }
+  .sp-reco b { color:#9fe0b6; }
+  .sp-yaml { margin-top:8px; background:#0a0e14; border:1px solid rgba(255,255,255,.08); border-radius:8px;
+    padding:9px 11px; font:11.5px/1.5 "IBM Plex Mono",ui-monospace,monospace; color:#cdd6e2; white-space:pre; overflow-x:auto; }
+  .sp-copy { margin-top:6px; font-size:11px; padding:4px 9px; height:26px; }
+  .sp-none { font-size:12.5px; color:var(--muted); margin-top:8px; }
   .pzhint { position:absolute; right:12px; bottom:10px; z-index:6; font-size:11px; color:#5b6472;
     background:rgba(8,9,12,.7); border:1px solid rgba(255,255,255,.06); border-radius:7px; padding:4px 9px; pointer-events:none; }
   body.panning #flow-wrap, body.panning #int-wrap, body.panning #access-wrap, body.panning #sankey-wrap { cursor:grab; }
@@ -165,6 +187,7 @@
     <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="access-wrap"><div id="access"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="sec-wrap"><div id="sec"></div></div>
+    <aside id="sec-panel"><button id="sec-panel-x" title="Fermer">✕</button><div id="sec-panel-body"></div></aside>
     <div id="sankey-wrap"><div id="sankey"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="explore-wrap">
       <div id="cy"></div>
@@ -387,7 +410,7 @@ function renderFlow(graph, ns) {
     } else {
       const glow = bad ? ' filter="url(#fsoft)"' : '';
       if ((n.kind==="Pod"||n.kind==="Service") && !bad) nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#fsh)"/>`;
-      nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}"${glow}>${ttl}</rect>`;
+      nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}"${glow} data-node="${n.id}">${ttl}</rect>`;
     }
     const tag = bad ? " ⚠" : idle ? " ·0" : "";
     const nsSuffix = (ALL && !isWL) ? " · " + esc(n.namespace||"") : "";
@@ -718,7 +741,7 @@ function renderInteractions(graph){
       nodes+=`<rect x="${P.x+nodeW-2.5}" y="${P.y}" width="2.5" height="${P.h}" rx="1.5" fill="${c}" filter="url(#isoft)"/>`;
       nodes+=`<rect x="${P.x+nodeW-1.5}" y="${P.y+1}" width="1.5" height="${P.h-2}" fill="#eef3fb"/>`;
     } else {
-      nodes+=`<rect x="${P.x}" y="${P.y}" width="${nodeW}" height="${P.h}" rx="2.5" fill="${c}"><title>${esc(n.kind)}/${esc(n.name)} · ${esc(n.namespace||"")}</title></rect>`;
+      nodes+=`<rect x="${P.x}" y="${P.y}" width="${nodeW}" height="${P.h}" rx="2.5" fill="${c}" data-node="${id}"><title>${esc(n.kind)}/${esc(n.name)} · ${esc(n.namespace||"")}</title></rect>`;
     }
     // Désambiguïsation : le kind (et le namespace) accompagnent le nom — un « website »
     // Ingress ≠ Service ≠ Deployment doivent se distinguer au premier coup d'œil.
@@ -817,7 +840,7 @@ function renderAccess(graph){
     const nsTag = n.namespace ? " · "+esc(n.namespace) : "";
     const ttl=`<title>${esc(n.kind)}/${esc(n.name)}${n.namespace?" ("+esc(n.namespace)+")":""}</title>`;
     nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#afsh)"/>`;
-    nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}">${ttl}</rect>`;
+    nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}" data-node="${n.id}">${ttl}</rect>`;
     if(c<=1) labels+=`<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${nsTag}</text>`;
     else labels+=`<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" font-size="11.5" font-weight="500" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${kindTag}${nsTag}</text>`;
   }
@@ -907,6 +930,56 @@ function renderSecurity(graph){
   setStatus(`sécurité : ${list.length} point(s) d'attention${prio?` · ${prio} à traiter en priorité`:""}`);
 }
 
+// Recommandation + exemple YAML par type de finding (informatif : à adapter, pas un patch auto).
+function recoFor(f){
+  const t=(f.title||"").toLowerCase(), c=f.category;
+  if(c==="pod"){
+    if(t.includes("privileged")) return {reco:"Retire <b>privileged</b> et durcis le securityContext ; ne garde que les capabilities nécessaires.", yaml:`# spec.template.spec.containers[].securityContext\nsecurityContext:\n  privileged: false\n  allowPrivilegeEscalation: false\n  runAsNonRoot: true\n  capabilities:\n    drop: ["ALL"]`};
+    if(t.includes("hostnetwork")||t.includes("hostpid")||t.includes("hostipc")) return {reco:"Supprime le partage d'espace hôte sauf besoin justifié (observabilité réseau…).", yaml:`# spec.template.spec\nhostNetwork: false\nhostPID: false\nhostIPC: false`};
+    if(t.includes("hostpath")) return {reco:"Remplace le montage <b>hostPath</b> par un PVC ou un emptyDir.", yaml:`# à la place d'un volume hostPath\nvolumes:\n  - name: data\n    persistentVolumeClaim:\n      claimName: mon-pvc`};
+    if(t.includes("root")) return {reco:"Force l'exécution en <b>non-root</b>.", yaml:`# spec.template.spec.securityContext\nsecurityContext:\n  runAsNonRoot: true\n  runAsUser: 10001\n  seccompProfile: { type: RuntimeDefault }`};
+    if(t.includes("escalation")) return {reco:"Interdis l'escalade de privilèges.", yaml:`# securityContext\nallowPrivilegeEscalation: false`};
+    if(t.includes("capability")) return {reco:"Drop toutes les capabilities, ajoute seulement celles strictement requises.", yaml:`# securityContext\ncapabilities:\n  drop: ["ALL"]\n  # add: ["NET_BIND_SERVICE"]  # si vraiment nécessaire`};
+    if(t.includes("default")) return {reco:"Crée un ServiceAccount dédié et coupe le montage du token si l'app n'appelle pas l'API K8s.", yaml:`apiVersion: v1\nkind: ServiceAccount\nmetadata: { name: mon-app-sa, namespace: <ns> }\nautomountServiceAccountToken: false\n---\n# spec.template.spec\nserviceAccountName: mon-app-sa\nautomountServiceAccountToken: false`};
+    return {reco:"Durcis le securityContext du pod.", yaml:`securityContext:\n  runAsNonRoot: true\n  allowPrivilegeEscalation: false\n  capabilities: { drop: ["ALL"] }`};
+  }
+  if(c==="rbac") return {reco:"Remplace ce rôle large par un <b>Role au moindre privilège</b>, limité aux ressources/verbes réellement nécessaires, lié au SA de l'app.", yaml:`apiVersion: rbac.authorization.k8s.io/v1\nkind: Role\nmetadata: { name: mon-app-role, namespace: <ns> }\nrules:\n  - apiGroups: [""]\n    resources: ["configmaps"]\n    verbs: ["get","list","watch"]   # au strict nécessaire\n---\nkind: RoleBinding\napiVersion: rbac.authorization.k8s.io/v1\nmetadata: { name: mon-app-rb, namespace: <ns> }\nroleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: mon-app-role }\nsubjects:\n  - { kind: ServiceAccount, name: <sa>, namespace: <ns> }`};
+  if(c==="exposure"){
+    if(t.includes("ingress")) return {reco:"Ajoute une <b>authentification</b> sur l'Ingress, restreins l'accès (allow-list / WAF) et pose une NetworkPolicy sur le backend.", yaml:`# Ingress nginx — exemple basic-auth\nmetadata:\n  annotations:\n    nginx.ingress.kubernetes.io/auth-type: basic\n    nginx.ingress.kubernetes.io/auth-secret: mon-auth`};
+    return {reco:"Repasse le service en <b>ClusterIP</b> et expose via un Ingress authentifié ; sinon restreins les sources.", yaml:`# service\nspec:\n  type: ClusterIP        # au lieu de LoadBalancer / NodePort\n# si exposition externe requise :\n#   loadBalancerSourceRanges: ["203.0.113.0/24"]`};
+  }
+  if(c==="network") return {reco:"Déclare explicitement le flux légitime dans une <b>NetworkPolicy</b> (ou bloque-le), et adopte un default-deny par namespace.", yaml:`apiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata: { name: allow-src-to-dst, namespace: <ns-cible> }\nspec:\n  podSelector: { matchLabels: { app: <dst> } }\n  policyTypes: ["Ingress"]\n  ingress:\n    - from:\n        - podSelector: { matchLabels: { app: <src> } }`};
+  return {reco:"", yaml:""};
+}
+let _secYaml={}, _yc=0;
+function openSecPanel(nodeId){
+  if(!secMode||!secIndex) return;
+  const byId={}; if(gGraph) for(const n of gGraph.nodes) byId[n.id]=n;
+  const n=byId[nodeId];
+  const fs=secIndex.list.filter(f=>f.node===nodeId||f.peer===nodeId).sort((a,b)=>SEV[b.severity]-SEV[a.severity]);
+  let html=`<div class="sp-kind">${n?esc(n.kind):""}</div><div class="sp-name">${n?esc(n.name):esc(nodeId)}</div><div class="sp-ns">${n&&n.namespace?esc(n.namespace):""}</div>`;
+  if(!fs.length){ html+=`<div class="sp-none">Aucun point d'attention sur ce nœud.</div>`; }
+  else for(const f of fs){
+    const col=SEV_COLOR[f.severity]||SEC_GREY, r=recoFor(f);
+    html+=`<div class="sp-f" style="border-left:4px solid ${col};padding-left:10px">`
+      +`<h4>${esc(f.title)} <span class="sev-tag" style="background:${col};font-size:9.5px;padding:2px 7px">${SEV_LABEL[f.severity]||f.severity}</span></h4>`
+      +`<div class="why">${esc(f.why)}</div><div class="ref">↳ ${esc(f.ref)}</div>`;
+    if(r.reco) html+=`<div class="sp-reco"><b>Recommandation.</b> ${r.reco}</div>`;
+    if(r.yaml){ const yid="y"+(_yc++); _secYaml[yid]=r.yaml; html+=`<div class="sp-yaml">${esc(r.yaml)}</div><button class="sp-copy" data-copy="${yid}">Copier le YAML</button>`; }
+    html+=`</div>`;
+  }
+  el("sec-panel-body").innerHTML=html;
+  el("sec-panel").classList.add("open");
+}
+function closeSecPanel(){ el("sec-panel").classList.remove("open"); }
+el("sec-panel-x").onclick=closeSecPanel;
+document.addEventListener("click", ev=>{
+  const cp=ev.target.closest && ev.target.closest("[data-copy]");
+  if(cp){ const y=_secYaml[cp.getAttribute("data-copy")]; if(y&&navigator.clipboard){ navigator.clipboard.writeText(y); cp.textContent="Copié ✓"; setTimeout(()=>cp.textContent="Copier le YAML",1200); } return; }
+  const nd=ev.target.closest && ev.target.closest("[data-node]");
+  if(nd && secMode){ openSecPanel(nd.getAttribute("data-node")); }
+});
+
 /* =================== Bascule =================== */
 async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
   el("hint").innerHTML="Réseau &amp; interactions — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré (config) non observé</b> · <b style='color:#ef4444'>rouge=dérive réseau</b> = trafic observé <b>non autorisé par une NetworkPolicy</b> (rouge seulement si la cible est protégée).";
@@ -929,11 +1002,12 @@ async function showSecurity(){ document.body.dataset.mode="security"; setTab("se
   el("hint").innerHTML="Sécurité — <b>points d'attention</b> (informer, pas corriger) : durcissement pod, RBAC/escalation, exposition, dérive réseau. Gravité <b style='color:#e3c341'>faible</b> → <b style='color:#e0883a'>moyen</b> → <b style='color:#e8622f'>élevé</b> → <b style='color:#ef4444'>critique</b>. Active « mode sécu » (en haut) sur les autres onglets pour colorer ces risques directement sur la carte.";
   try { const g=await ensureGraph(); await ensureSec(g); renderSecurity(g); }
   catch(e){ setStatus("API injoignable : "+e.message); el("sec").innerHTML="<div id='sec-empty'>API injoignable : "+esc(e.message)+"</div>"; } }
-function setTab(m){ for (const t of ["flow","interactions","access","security","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
+function setTab(m){ closeSecPanel(); for (const t of ["flow","interactions","access","security","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
 el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-security").onclick=showSecurity; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
 el("ns-picker").onchange=()=>{ if(gGraph){ if(secMode) ensureSec(gGraph).then(()=>renderFlow(gGraph, el("ns-picker").value)); else renderFlow(gGraph, el("ns-picker").value); } };
 el("hide-infra").onchange=()=>{ if(gGraph) renderInteractions(gGraph); };
 el("sec-mode").onchange=async()=>{ secMode=el("sec-mode").checked; const m=document.body.dataset.mode;
+  document.body.classList.toggle("secmode", secMode); if(!secMode) closeSecPanel();
   if(secMode && gGraph){ try{ await ensureSec(gGraph); }catch(_){} }
   if(m==="flow"&&gGraph) renderFlow(gGraph, el("ns-picker").value);
   else if(m==="interactions"&&gGraph) renderInteractions(gGraph);
