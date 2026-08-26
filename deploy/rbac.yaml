@@ -29,7 +29,13 @@ rules:
   # NetworkPolicies). NB : on ne demande PAS "secrets" — les secrets utilisés
   # sont déduits des specs des workloads, sans jamais lire leurs valeurs.
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "namespaces", "persistentvolumeclaims", "persistentvolumes"]
+    resources: ["pods", "services", "configmaps", "namespaces", "persistentvolumeclaims", "persistentvolumes", "serviceaccounts"]
+    verbs: ["get", "list", "watch"]
+  # RBAC : Roles, ClusterRoles et leurs bindings (« qui peut quoi »). LECTURE
+  # SEULE. NB : on ne demande TOUJOURS PAS "secrets" — les secrets utilisés sont
+  # déduits des specs des workloads (noms seuls), jamais lus (`.data` inaccessible).
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "clusterroles", "rolebindings", "clusterrolebindings"]
     verbs: ["get", "list", "watch"]
   # Workloads : Deployments, ReplicaSets, StatefulSets, DaemonSets.
   - apiGroups: ["apps"]

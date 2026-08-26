@@ -68,12 +68,13 @@
   .switch { font-size:12px; color:var(--muted); text-transform:none; letter-spacing:0; font-weight:500; }
   .hint { font-size:12px; color:var(--muted); padding:8px 16px 0; }
   .stage { flex:1; min-height:0; position:relative; display:flex; }
-  #flow-wrap, #sankey-wrap { flex:1; min-height:0; overflow:auto; display:none; }
-  #flow-wrap, #sankey-wrap { background:#08090c; padding:14px 18px; }
+  #flow-wrap, #sankey-wrap, #access-wrap { flex:1; min-height:0; overflow:auto; display:none; }
+  #flow-wrap, #sankey-wrap, #access-wrap { background:#08090c; padding:14px 18px; }
   /* Schémas responsive : jamais plus large que le conteneur (pas de débordement). */
-  #flow svg, #cyint svg, #sankey svg { max-width:100%; height:auto; display:block; }
+  #flow svg, #cyint svg, #sankey svg, #access svg { max-width:100%; height:auto; display:block; }
   body[data-mode="flow"] #flow-wrap { display:block; }
   body[data-mode="overview"] #sankey-wrap { display:block; }
+  body[data-mode="access"] #access-wrap { display:block; }
   #int-wrap { flex:1; min-height:0; display:none; position:relative; overflow:auto; background:#08090c; padding:14px 18px; }
   body[data-mode="interactions"] #int-wrap { display:block; }
   #cyint { width:100%; }
@@ -106,6 +107,7 @@
     <div class="tabs">
       <button id="tab-flow">Exécution</button>
       <button id="tab-interactions" class="active">Réseau &amp; interactions</button>
+      <button id="tab-access">Accès &amp; identité</button>
       <button id="tab-overview">Vue d'ensemble</button>
       <button id="tab-explore">Explorer</button>
     </div>
@@ -131,6 +133,7 @@
   <div class="stage">
     <div id="flow-wrap"><div id="flow"></div></div>
     <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div></div>
+    <div id="access-wrap"><div id="access"></div></div>
     <div id="sankey-wrap"><div id="sankey"></div></div>
     <div id="explore-wrap">
       <div id="cy"></div>
@@ -491,6 +494,7 @@ window.addEventListener("resize", () => { cy.resize();
   clearTimeout(_rzT); _rzT = setTimeout(() => { const m = document.body.dataset.mode;
     if (m === "flow" && gGraph) renderFlow(gGraph, el("ns-picker").value);
     else if (m === "interactions" && gGraph) renderInteractions(gGraph);
+    else if (m === "access" && gGraph) renderAccess(gGraph);
     else if (m === "overview" && gNodes) renderOverview(gNodes);
   }, 180);
 });
@@ -701,6 +705,84 @@ function renderInteractions(graph){
   setStatus(msg);
 }
 
+/* =================== ACCÈS & IDENTITÉ — Secret → Workload → SA → Rôle =================== */
+function renderAccess(graph){
+  const host = el("access");
+  const byId={}; for(const n of graph.nodes) byId[n.id]=n;
+  const colA = k => k==="Secret"?0 : WKINDS.includes(k)?1 : k==="ServiceAccount"?2 : (k==="Role"||k==="ClusterRole")?3 : -1;
+  // Liens orientés gauche→droite : Secret→Workload (REFERENCES inversé), Workload→SA (RUNS_AS), SA→Rôle (GRANTS).
+  const links=[];
+  for(const e of graph.edges){
+    if(e.type==="REFERENCES"){ if(byId[e.source]&&byId[e.target]) links.push({s:e.target,t:e.source}); }
+    else if(e.type==="RUNS_AS"){ if(byId[e.source]&&byId[e.target]) links.push({s:e.source,t:e.target}); }
+    else if(e.type==="GRANTS"){ if(byId[e.source]&&byId[e.target]) links.push({s:e.source,t:e.target}); }
+  }
+  const connected=new Set(); for(const l of links){connected.add(l.s);connected.add(l.t);}
+  const col=[[],[],[],[]];
+  for(const n of graph.nodes){ const c=colA(n.kind); if(c>=0 && connected.has(n.id)) col[c].push(n); }
+  if(col.every(c=>!c.length)){ host.innerHTML="<p style='color:var(--muted);padding:24px'>Aucune donnée d'accès. Vérifie que le hub peut lire ServiceAccounts et RBAC (roles/bindings).</p>"; setStatus("accès vide"); return; }
+
+  const inSum={},outSum={};
+  for(const l of links){ l.val=1; outSum[l.s]=(outSum[l.s]||0)+1; inSum[l.t]=(inSum[l.t]||0)+1; }
+  const scale=13, minH=10, gap=11;
+  const H={}; for(let c=0;c<4;c++) for(const n of col[c]) H[n.id]=Math.max(minH,(inSum[n.id]||0)*scale,(outSum[n.id]||0)*scale);
+
+  const inAdj={},outAdj={}; for(const l of links){ (outAdj[l.s]=outAdj[l.s]||[]).push(l.t); (inAdj[l.t]=inAdj[l.t]||[]).push(l.s); }
+  const idxOf=arr=>{const m={};arr.forEach((n,i)=>m[n.id]=i);return m;};
+  const bary=(n,adj,idx)=>{const src=(adj[n.id]||[]).filter(id=>idx[id]!==undefined);return src.length?src.reduce((a,id)=>a+idx[id],0)/src.length:1e9;};
+  col[1].sort((a,b)=>(a.namespace||"").localeCompare(b.namespace||"")||a.name.localeCompare(b.name));
+  let i1=idxOf(col[1]);
+  col[0].sort((a,b)=>bary(a,outAdj,i1)-bary(b,outAdj,i1)||a.name.localeCompare(b.name));
+  col[2].sort((a,b)=>bary(a,inAdj,i1)-bary(b,inAdj,i1)||a.name.localeCompare(b.name));
+  let i2=idxOf(col[2]);
+  col[3].sort((a,b)=>bary(a,inAdj,i2)-bary(b,inAdj,i2)||a.name.localeCompare(b.name));
+
+  const W=Math.max(host.clientWidth||1200,1080), Mt=46, Mb=26;
+  const leftPad=210, rightPad=230, nodeW=12;
+  const colX=i=> leftPad + ((W-leftPad-rightPad)/3)*i;
+  const colTot=[]; for(let c=0;c<4;c++){ let t=0; for(const n of col[c]) t+=H[n.id]+gap; colTot[c]=Math.max(0,t-gap); }
+  const maxTot=Math.max(1,...colTot);
+  const pos={};
+  for(let c=0;c<4;c++){ let y=Mt+(maxTot-colTot[c])/2; for(const n of col[c]){ pos[n.id]={x:colX(c),y,h:H[n.id],col:c}; y+=H[n.id]+gap; } }
+
+  const outL={},inL={};
+  for(const l of links){ (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l); }
+  const allocFill=(map,key,pre)=>{ for(const idk in map){ const arr=map[idk],p=pos[idk]; if(!p) continue;
+    arr.sort((a,b)=>((pos[a[key]]||{}).y||0)-((pos[b[key]]||{}).y||0));
+    const sum=arr.reduce((s,l)=>s+l.val,0)||1; let off=p.y; for(const l of arr){ const th=p.h*l.val/sum; l[pre+"y"]=off; l[pre+"th"]=th; off+=th; } } };
+  allocFill(outL,"t","s"); allocFill(inL,"s","t");
+
+  const ACOL=k=> k==="Secret"?"#d98a5b" : WKINDS.includes(k)?"oklch(0.88 0.22 178.95)" : k==="ServiceAccount"?"#7c9cf5" : (k==="Role"||k==="ClusterRole")?"#c678c9" : "#6b7688";
+  const DIP="#202634", END="#66707f";
+  const band=(x0,ys,ths,x1,yt,tht)=>{ const c=(x0+x1)/2; return `M${x0},${ys} C${c},${ys} ${c},${yt} ${x1},${yt} L${x1},${yt+tht} C${c},${yt+tht} ${c},${ys+ths} ${x0},${ys+ths} Z`; };
+  let defs=`<filter id="afsh" x="-120%" y="-120%" width="340%" height="340%"><feGaussianBlur stdDeviation="3.6"/></filter>`;
+  defs+=`<linearGradient id="aflxstart" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#eafcff" stop-opacity=".26"/><stop offset=".09" stop-color="#eafcff" stop-opacity="0"/></linearGradient>`;
+  let rib="",nodes="",labels="",gi=0;
+  for(const l of links){ const P=pos[l.s],Q=pos[l.t]; if(!P||!Q||l.sy==null||l.ty==null) continue;
+    const c0=ACOL(byId[l.s].kind), gid="ag"+(gi++);
+    defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${c0}" stop-opacity=".78"/><stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/><stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
+    const d=band(P.x+nodeW-1,l.sy,l.sth,Q.x+2,l.ty,l.tth);
+    rib+=`<path d="${d}" fill="url(#${gid})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
+    rib+=`<path d="${d}" fill="url(#aflxstart)"/>`;
+  }
+  for(let c=0;c<4;c++) for(const n of col[c]){ const p=pos[n.id], cap=ACOL(n.kind);
+    const kindTag = n.kind==="ClusterRole" ? " [cluster]" : "";
+    const nsTag = n.namespace ? " · "+esc(n.namespace) : "";
+    const ttl=`<title>${esc(n.kind)}/${esc(n.name)}${n.namespace?" ("+esc(n.namespace)+")":""}</title>`;
+    nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#afsh)"/>`;
+    nodes+=`<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${cap}">${ttl}</rect>`;
+    if(c<=1) labels+=`<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${nsTag}</text>`;
+    else labels+=`<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" font-size="11.5" font-weight="500" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(n.name)}${kindTag}${nsTag}</text>`;
+  }
+  const svgH=Mt+maxTot+Mb;
+  const heads=["SECRETS","WORKLOAD","SERVICEACCOUNT","RÔLES"];
+  let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui"><defs>${defs}</defs>`;
+  for(let c=0;c<4;c++) s+=`<text x="${(colX(c)+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${heads[c]}</text>`;
+  s+=rib+nodes+labels+`</svg>`;
+  host.innerHTML=s;
+  setStatus(`${col[1].length} workloads · ${col[2].length} ServiceAccounts · ${col[3].length} rôles · ${col[0].length} secrets référencés`);
+}
+
 /* =================== Bascule =================== */
 async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
   el("hint").innerHTML="Réseau &amp; interactions — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré (config) non observé</b> · <b style='color:#ef4444'>rouge=dérive réseau</b> = trafic observé <b>non autorisé par une NetworkPolicy</b> (rouge seulement si la cible est protégée).";
@@ -716,13 +798,16 @@ async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab(
 async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore"); setLegend(LAYER_LEGEND);
   el("hint").textContent="Explorer — choisis un départ puis Charger. Survole pour isoler les liens, clique pour le détail et déplier le cercle suivant.";
   try { fillPicker(await ensureNodes()); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
-function setTab(m){ for (const t of ["flow","interactions","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
-el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
+async function showAccess(){ document.body.dataset.mode="access"; setTab("access"); setLegend(ACCESS_LEGEND);
+  el("hint").innerHTML="Accès &amp; identité — pour chaque app : ses <b style='color:#d98a5b'>secrets</b> référencés (nom seul, jamais la valeur) → le <b>workload</b> → le <b style='color:#7c9cf5'>ServiceAccount</b> sous lequel il tourne → les <b style='color:#c678c9'>Rôles</b> qui lui sont accordés (RBAC). Répond à « qui tourne comme quoi, et qu'est-ce que ça peut faire ».";
+  try { renderAccess(await ensureGraph()); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
+function setTab(m){ for (const t of ["flow","interactions","access","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
+el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
 el("ns-picker").onchange=()=>{ if(gGraph) renderFlow(gGraph, el("ns-picker").value); };
 el("hide-infra").onchange=()=>{ if(gGraph) renderInteractions(gGraph); };
 el("refresh").onclick=async()=>{ gGraph=null; gNodes=null;
   const m=document.body.dataset.mode;
-  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="overview") showOverviewTab(); else showExplore(); };
+  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="access") showAccess(); else if(m==="overview") showOverviewTab(); else showExplore(); };
 // Légende contextuelle : Flux/Carte affichent le vrai code couleur par KIND (+ statut) ;
 // Vue d'ensemble / Explorer gardent le code par couche.
 const chip = (c,l) => `<span class="chip"><span class="dot" style="background:${c}"></span>${l}</span>`;
@@ -732,6 +817,9 @@ const KIND_LEGEND =
   chip("#5fb3c9","Pod") + chip("#6b7688","Service") + chip("#5b9bff","Ingress") +
   `<span class="chip" style="margin-left:10px"><span class="dot" style="background:#e0a94a"></span>0 pod / idle</span>` +
   chip("#ef4444","cassé / dérive");
+const ACCESS_LEGEND =
+  chip("#d98a5b","Secret (nom seul)") + chip("oklch(0.88 0.22 178.95)","Workload") +
+  chip("#7c9cf5","ServiceAccount") + chip("#c678c9","Role / ClusterRole");
 const setLegend = html => { el("legend").innerHTML = html; };
 setLegend(KIND_LEGEND);
 

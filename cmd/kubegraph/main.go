@@ -45,7 +45,7 @@ func main() {
 		edgeCounts[string(e.Type)]++
 	}
 	fmt.Printf("kubegraph %s — cluster %q : %d nœuds, %d arêtes\n", version, src.ClusterID(), len(nodes), len(edges))
-	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod", "Service", "Ingress", "NetworkPolicy", "HorizontalPodAutoscaler", "PersistentVolumeClaim", "PersistentVolume", "PodDisruptionBudget"} {
+	for _, kind := range []string{"Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "Pod", "Service", "Ingress", "NetworkPolicy", "HorizontalPodAutoscaler", "PersistentVolumeClaim", "PersistentVolume", "PodDisruptionBudget", "ServiceAccount", "Role", "ClusterRole", "Secret"} {
 		if counts[kind] > 0 {
 			fmt.Printf("  %-14s %d\n", kind, counts[kind])
 		}

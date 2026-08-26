@@ -182,6 +182,12 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 	nodes = append(nodes, xn...)
 	edges = append(edges, xe...)
 
+	// Accès & identité : ServiceAccount, Role/ClusterRole (bindings repliés en
+	// GRANTS), et secrets RÉFÉRENCÉS (noms déduits des specs, jamais les valeurs).
+	an, ae := s.collectAccess(ctx, pods.Items, topWL)
+	nodes = append(nodes, an...)
+	edges = append(edges, ae...)
+
 	return nodes, edges, nil
 }
 

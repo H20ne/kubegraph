@@ -80,6 +80,11 @@ const (
 	// workloads réellement isolés (un « allow-all » ne protège pas).
 	EdgeProtectsIn  EdgeType = "PROTECTS_IN"  // NetworkPolicy -> workload isolé en ENTRÉE
 	EdgeProtectsOut EdgeType = "PROTECTS_OUT" // NetworkPolicy -> workload isolé en SORTIE
+
+	// Accès & identité (qui tourne comme quoi, et ce que ça peut faire) :
+	EdgeRunsAs     EdgeType = "RUNS_AS"    // Workload -> ServiceAccount (spec.serviceAccountName)
+	EdgeGrants     EdgeType = "GRANTS"     // ServiceAccount -> Role/ClusterRole (via un binding)
+	EdgeReferences EdgeType = "REFERENCES" // Workload -> Secret référencé (NOM seul, jamais la valeur)
 )
 
 // Edge est une relation dirigée entre deux nœuds.
