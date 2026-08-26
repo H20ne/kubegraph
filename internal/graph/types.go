@@ -56,6 +56,12 @@ const (
 	EdgeOwnedBy  EdgeType = "OWNED_BY"  // Pod -> ReplicaSet -> Deployment (ownerReferences)
 	EdgeSelects  EdgeType = "SELECTS"   // Service -> Pod (matching de labels)
 	EdgeRoutesTo EdgeType = "ROUTES_TO" // Ingress -> Service (rules.backend.service)
+
+	// Dépendances au-delà du câblage standard (souvent cross-namespace) :
+	EdgeScales   EdgeType = "SCALES"   // ScaledObject (KEDA) -> Deployment (scaleTargetRef)
+	EdgeTriggers EdgeType = "TRIGGERS" // Service source (ex: Kafka) -> ScaledObject (trigger KEDA)
+	EdgeUses     EdgeType = "USES"     // Workload -> Service référencé dans sa config (env/ConfigMap)
+	EdgeAllows   EdgeType = "ALLOWS"   // NetworkPolicy : connectivité autorisée (déclarée, pas observée)
 )
 
 // Edge est une relation dirigée entre deux nœuds.

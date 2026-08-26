@@ -15,7 +15,7 @@ import (
 )
 
 // version du binaire (à remplacer par une injection au build plus tard).
-const version = "0.7.0-graph"
+const version = "0.8.0-keda"
 
 func main() {
 	// kubeconfig via l'env KUBECONFIG, sinon règles par défaut (~/.kube/config).

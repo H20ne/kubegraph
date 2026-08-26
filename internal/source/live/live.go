@@ -10,6 +10,7 @@ import (
 	"fmt"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -22,6 +23,7 @@ import (
 type Source struct {
 	clusterID string
 	client    kubernetes.Interface
+	dyn       dynamic.Interface // pour les CRD (KEDA…) ; peut être nil
 }
 
 // New construit une Source live à partir d'un kubeconfig.
@@ -37,15 +39,24 @@ func New(kubeconfigPath, clusterID string) (*Source, error) {
 	if err != nil {
 		return nil, fmt.Errorf("création du client kubernetes : %w", err)
 	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("création du client dynamique : %w", err)
+	}
 	if clusterID == "" {
 		clusterID = ctxName
 	}
-	return &Source{clusterID: clusterID, client: client}, nil
+	return &Source{clusterID: clusterID, client: client, dyn: dyn}, nil
 }
 
 // NewWithClient injecte un client (utilisé par les tests avec le fake client).
 func NewWithClient(client kubernetes.Interface, clusterID string) *Source {
 	return &Source{clusterID: clusterID, client: client}
+}
+
+// NewWithClients injecte les deux clients (tests couvrant les CRD comme KEDA).
+func NewWithClients(client kubernetes.Interface, dyn dynamic.Interface, clusterID string) *Source {
+	return &Source{clusterID: clusterID, client: client, dyn: dyn}
 }
 
 // ClusterID satisfait source.Source.
@@ -101,6 +112,24 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 		Services:    services.Items,
 		Ingresses:   ingresses.Items,
 	})
+
+	// Index (namespace/name -> uid) pour rattacher les dépendances cross-namespace.
+	deployUID := make(map[string]string, len(deployments.Items))
+	for i := range deployments.Items {
+		d := &deployments.Items[i]
+		deployUID[d.Namespace+"/"+d.Name] = string(d.UID)
+	}
+	svcUID := make(map[string]string, len(services.Items))
+	for i := range services.Items {
+		sv := &services.Items[i]
+		svcUID[sv.Namespace+"/"+sv.Name] = string(sv.UID)
+	}
+
+	// KEDA (CRD) : ScaledObject -> Deployment, et Service déclencheur -> ScaledObject.
+	if kn, ke := s.collectKeda(ctx, deployUID, svcUID); kn != nil {
+		nodes = append(nodes, kn...)
+		edges = append(edges, ke...)
+	}
 
 	return nodes, edges, nil
 }

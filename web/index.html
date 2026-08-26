@@ -297,6 +297,9 @@ const cy = cytoscape({
       "label":"", "font-size":8, "color":"#8b949e", "text-rotation":"autorotate",
       "text-background-color":"#0e1116", "text-background-opacity":1, "text-background-padding":2 }},
     { selector:"edge.hl", style:{ "line-color":"#58a6ff", "target-arrow-color":"#58a6ff", "width":2, "label":"data(type)", "z-index":19 }},
+    // Dépendances hors câblage standard (KEDA, config, netpol) : en évidence.
+    { selector:'edge[type="SCALES"],edge[type="TRIGGERS"],edge[type="USES"],edge[type="ALLOWS"]',
+      style:{ "line-color":"#f0883e", "target-arrow-color":"#f0883e", "line-style":"dashed", "width":2, "label":"data(type)", "color":"#f0883e", "text-opacity":1 }},
     { selector:".faded", style:{ "opacity":0.12, "text-opacity":0 }},
   ],
 });
