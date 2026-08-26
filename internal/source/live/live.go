@@ -87,10 +87,24 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 	if err != nil {
 		return nil, nil, fmt.Errorf("liste des ingresses : %w", err)
 	}
+	statefulSets, err := s.client.AppsV1().StatefulSets("").List(ctx, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("liste des statefulsets : %w", err)
+	}
+	daemonSets, err := s.client.AppsV1().DaemonSets("").List(ctx, opts)
+	if err != nil {
+		return nil, nil, fmt.Errorf("liste des daemonsets : %w", err)
+	}
 
 	var nodes []graph.Node
 	for i := range deployments.Items {
 		nodes = append(nodes, s.node(&deployments.Items[i].ObjectMeta, "Deployment", graph.LayerWorkload))
+	}
+	for i := range statefulSets.Items {
+		nodes = append(nodes, s.node(&statefulSets.Items[i].ObjectMeta, "StatefulSet", graph.LayerWorkload))
+	}
+	for i := range daemonSets.Items {
+		nodes = append(nodes, s.node(&daemonSets.Items[i].ObjectMeta, "DaemonSet", graph.LayerWorkload))
 	}
 	for i := range replicaSets.Items {
 		nodes = append(nodes, s.node(&replicaSets.Items[i].ObjectMeta, "ReplicaSet", graph.LayerWorkload))
@@ -99,7 +113,10 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 		nodes = append(nodes, s.node(&pods.Items[i].ObjectMeta, "Pod", graph.LayerWorkload))
 	}
 	for i := range services.Items {
-		nodes = append(nodes, s.node(&services.Items[i].ObjectMeta, "Service", graph.LayerNetworking))
+		sv := &services.Items[i]
+		n := s.node(&sv.ObjectMeta, "Service", graph.LayerNetworking)
+		n.NoSelector = len(sv.Spec.Selector) == 0
+		nodes = append(nodes, n)
 	}
 	for i := range ingresses.Items {
 		nodes = append(nodes, s.node(&ingresses.Items[i].ObjectMeta, "Ingress", graph.LayerNetworking))

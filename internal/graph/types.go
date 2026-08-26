@@ -45,6 +45,11 @@ type Node struct {
 	Labels    map[string]string // metadata.labels
 	Layer     Layer             // couche fonctionnelle (couleur du cercle)
 	Origin    Origin            // observed | declared
+
+	// NoSelector ne concerne que les Services : vrai si spec.selector est vide
+	// (kubernetes, ExternalName, headless à endpoints externes). Un tel service
+	// n'a pas de pods par conception → ne pas le marquer "cassé".
+	NoSelector bool
 }
 
 // EdgeType énumère les relations reconnues entre nœuds. On démarre le MVP avec

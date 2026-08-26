@@ -64,12 +64,13 @@ func (h *Handler) nodes(w http.ResponseWriter, _ *http.Request) {
 	out := make([]listNodeDTO, 0, len(src))
 	for _, n := range src {
 		out = append(out, listNodeDTO{
-			ID:        idStr(n.ID),
-			Cluster:   n.ID.ClusterID,
-			Kind:      n.Kind,
-			Namespace: n.Namespace,
-			Name:      n.Name,
-			Layer:     string(n.Layer),
+			ID:         idStr(n.ID),
+			Cluster:    n.ID.ClusterID,
+			Kind:       n.Kind,
+			Namespace:  n.Namespace,
+			Name:       n.Name,
+			Layer:      string(n.Layer),
+			NoSelector: n.NoSelector,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -88,7 +89,7 @@ func (h *Handler) graph(w http.ResponseWriter, _ *http.Request) {
 	for _, n := range srcNodes {
 		out.Nodes = append(out.Nodes, listNodeDTO{
 			ID: idStr(n.ID), Cluster: n.ID.ClusterID, Kind: n.Kind,
-			Namespace: n.Namespace, Name: n.Name, Layer: string(n.Layer),
+			Namespace: n.Namespace, Name: n.Name, Layer: string(n.Layer), NoSelector: n.NoSelector,
 		})
 	}
 	for _, e := range srcEdges {
@@ -142,12 +143,13 @@ type nodeDTO struct {
 }
 
 type listNodeDTO struct {
-	ID        string `json:"id"`
-	Cluster   string `json:"cluster"`
-	Kind      string `json:"kind"`
-	Namespace string `json:"namespace,omitempty"`
-	Name      string `json:"name"`
-	Layer     string `json:"layer"`
+	ID         string `json:"id"`
+	Cluster    string `json:"cluster"`
+	Kind       string `json:"kind"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name"`
+	Layer      string `json:"layer"`
+	NoSelector bool   `json:"noSelector,omitempty"`
 }
 
 type edgeDTO struct {

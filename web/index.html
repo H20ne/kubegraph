@@ -130,83 +130,98 @@ async function ensureGraph() { if (!gGraph) gGraph = await fetchJSON("/graph"); 
 async function ensureNodes() { if (!gNodes) gNodes = await fetchJSON("/nodes"); return gNodes; }
 
 /* =================== FLUX — Sankey de dépendances =================== */
-const COLS = ["Deployment","ReplicaSet","Pod","Service","Ingress"];
-const colOf = k => COLS.indexOf(k);
+// 4 colonnes : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress.
+// Le ReplicaSet est collapsé (on remonte le pod jusqu'à son contrôleur de tête).
+const WKINDS = ["Deployment","StatefulSet","DaemonSet"];
+const COLS = ["Workload","Pod","Service","Ingress"];
+const colOf = k => WKINDS.includes(k) ? 0 : k==="Pod" ? 1 : k==="Service" ? 2 : k==="Ingress" ? 3 : -1;
 
+const ALL_NS = "__all__";
 function fillNsPicker(graph) {
-  const count = {};
-  for (const n of graph.nodes) if (colOf(n.kind) >= 0) { const ns = n.namespace || "—"; count[ns] = (count[ns]||0)+1; }
+  const count = {}; let total = 0;
+  for (const n of graph.nodes) if (colOf(n.kind) >= 0) { const ns = n.namespace || "—"; count[ns] = (count[ns]||0)+1; total++; }
   const list = Object.keys(count).sort((a,b)=>count[b]-count[a]);
   const sel = el("ns-picker"); const cur = sel.value;
   sel.innerHTML = "";
+  const all = document.createElement("option"); all.value = ALL_NS; all.textContent = `Tous les namespaces (${total})`; sel.appendChild(all);
   for (const ns of list) { const o = document.createElement("option"); o.value = ns; o.textContent = `${ns} (${count[ns]})`; sel.appendChild(o); }
-  if (cur && list.includes(cur)) sel.value = cur;
+  if (cur && (cur === ALL_NS || list.includes(cur))) sel.value = cur;
   return list;
 }
 
 function renderFlow(graph, ns) {
   const host = el("flow");
   const byId = {}; for (const n of graph.nodes) byId[n.id] = n;
-  const inNs = n => (n.namespace || "—") === ns;
+  const ALL = ns === ALL_NS;
+  const inNs = n => ALL || (n.namespace || "—") === ns;
 
   // Liens de chaîne = arêtes inversées (owner→child, pod→service, service→ingress),
   // uniquement entre colonnes adjacentes et dans le namespace choisi.
+  // Contrôleur de tête d'un objet (on collapse le ReplicaSet).
+  const ownerOf = {};
+  for (const e of graph.edges) if (e.type === "OWNED_BY") ownerOf[e.source] = e.target;
+  const topWorkload = id => { let cur = ownerOf[id], g = 0;
+    while (cur && g++ < 12) { const k = byId[cur] && byId[cur].kind; if (WKINDS.includes(k)) return cur; cur = ownerOf[cur]; }
+    return null; };
+
   const links = [];
+  // Workload -> Pod (en remontant jusqu'au contrôleur de tête : Deployment via
+  // son RS, ou StatefulSet / DaemonSet directement).
+  for (const n of graph.nodes) {
+    if (n.kind !== "Pod" || !inNs(n)) continue;
+    const w = topWorkload(n.id);
+    if (w && byId[w] && inNs(byId[w])) links.push({ s: w, t: n.id });
+  }
+  // Pod -> Service (SELECTS inversé) et Service -> Ingress (ROUTES_TO inversé).
   for (const e of graph.edges) {
-    const s = byId[e.target], t = byId[e.source];      // inversion
+    if (e.type !== "SELECTS" && e.type !== "ROUTES_TO") continue;
+    const s = byId[e.target], t = byId[e.source];
     if (!s || !t || !inNs(s) || !inNs(t)) continue;
-    const cs = colOf(s.kind), ct = colOf(t.kind);
-    if (cs < 0 || ct < 0 || ct !== cs + 1) continue;
     links.push({ s: e.target, t: e.source });
   }
   const out = {}, inc = {};
   for (const l of links) { (out[l.s] = out[l.s]||[]).push(l.t); (inc[l.t] = inc[l.t]||[]).push(l.s); }
 
-  // Nœuds par colonne (tous les objets du ns dans les 5 types).
-  const col = [[],[],[],[],[]];
+  // Nœuds par colonne : Workload / Pod / Service / Ingress.
+  const col = [[],[],[],[]];
   for (const n of graph.nodes) { if (!inNs(n)) continue; const c = colOf(n.kind); if (c >= 0) col[c].push(n); }
 
   // Valeur en pods.
   const pv = {};
-  for (const n of col[2]) pv[n.id] = 1;                                             // Pod
-  for (const n of col[1]) pv[n.id] = (out[n.id]||[]).length;                        // ReplicaSet -> #pods
-  for (const n of col[0]) pv[n.id] = (out[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0); // Deployment
-  for (const n of col[3]) pv[n.id] = (inc[n.id]||[]).length;                        // Service -> #pods
-  for (const n of col[4]) pv[n.id] = (inc[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0); // Ingress
-
-  // On masque les ReplicaSets morts (0 pod = historique de révisions).
-  const dropped = new Set(col[1].filter(n => (pv[n.id]||0) === 0).map(n => n.id));
-  col[1] = col[1].filter(n => !dropped.has(n.id));
-  const flinks = links.filter(l => !dropped.has(l.s) && !dropped.has(l.t));
+  for (const n of col[1]) pv[n.id] = 1;                                              // Pod
+  for (const n of col[0]) pv[n.id] = (out[n.id]||[]).length;                         // Workload -> #pods
+  for (const n of col[2]) pv[n.id] = (inc[n.id]||[]).length;                         // Service -> #pods
+  for (const n of col[3]) pv[n.id] = (inc[n.id]||[]).reduce((a,id)=>a+(pv[id]||0),0);// Ingress
+  const flinks = links;
 
   if (col.every(c => c.length === 0)) { host.innerHTML = "<p style='color:var(--muted);padding:24px'>Rien à afficher dans ce namespace.</p>"; return; }
 
   // Ordonnancement par barycentre (réduit les croisements).
   col[0].sort((a,b)=>a.name.localeCompare(b.name));
-  for (let c = 1; c < 5; c++) {
+  for (let c = 1; c < 4; c++) {
     const idx = {}; col[c-1].forEach((n,i)=>idx[n.id]=i);
     col[c].forEach(n => { const src=(inc[n.id]||[]).filter(id=>idx[id]!==undefined);
       n._b = src.length ? src.reduce((a,id)=>a+idx[id],0)/src.length : 1e9; });
     col[c].sort((a,b)=>(a._b-b._b)||a.name.localeCompare(b.name));
   }
 
-  // Géométrie.
+  // Géométrie (4 colonnes).
   const scale = 7, minH = 16, gap = 7, headY = 26;
-  const W = Math.max(host.clientWidth || 1200, 1080);
-  const leftPad = 195, rightPad = 215, nodeW = 12, Mt = 40, Mb = 24;
-  const colX = i => leftPad + ((W - leftPad - rightPad) / 4) * i;
+  const W = Math.max(host.clientWidth || 1200, 1000);
+  const leftPad = 210, rightPad = 220, nodeW = 12, Mt = 40, Mb = 24;
+  const colX = i => leftPad + ((W - leftPad - rightPad) / 3) * i;
 
   const H = {}, colTot = [];
-  for (let c = 0; c < 5; c++) { let t = 0; for (const n of col[c]) { const h = Math.max(minH, (pv[n.id]||0)*scale); H[n.id]=h; t += h + gap; } colTot[c] = Math.max(0, t - gap); }
+  for (let c = 0; c < 4; c++) { let t = 0; for (const n of col[c]) { const h = Math.max(minH, (pv[n.id]||0)*scale); H[n.id]=h; t += h + gap; } colTot[c] = Math.max(0, t - gap); }
   const maxTot = Math.max(1, ...colTot);
   const pos = {};
-  for (let c = 0; c < 5; c++) { let y = Mt + (maxTot - colTot[c]) / 2; for (const n of col[c]) { pos[n.id] = { x: colX(c), y, h: H[n.id], col: c }; y += H[n.id] + gap; } }
+  for (let c = 0; c < 4; c++) { let y = Mt + (maxTot - colTot[c]) / 2; for (const n of col[c]) { pos[n.id] = { x: colX(c), y, h: H[n.id], col: c }; y += H[n.id] + gap; } }
 
-  // Bandes des rubans.
+  // Bandes des rubans (val = pods qui coulent).
   const outL = {}, inL = {};
   for (const l of flinks) {
     const sk = byId[l.s].kind;
-    l.val = sk==="Deployment" ? (pv[l.t]||0) : sk==="Service" ? (pv[l.s]||0) : 1;
+    l.val = colOf(sk)===0 ? (pv[l.t]||1) : sk==="Service" ? (pv[l.s]||1) : 1;
     (outL[l.s]=outL[l.s]||[]).push(l); (inL[l.t]=inL[l.t]||[]).push(l);
   }
   const alloc = (map, key, yKey) => {
@@ -219,36 +234,44 @@ function renderFlow(graph, ns) {
   };
   alloc(outL, "t", "sy"); alloc(inL, "s", "ty");
 
-  // SVG.
+  // Est-ce un nœud "cassé" ? Service : sélecteur présent mais 0 pod. Ingress :
+  // 0 flux entrant. Un service SANS sélecteur (kubernetes, ExternalName…) n'est
+  // PAS cassé.
+  const isBad = n => { const v = pv[n.id]||0;
+    if (n.kind === "Service") return v === 0 && !n.noSelector;
+    if (n.kind === "Ingress") return v === 0;
+    return false; };
+  const isIdle = n => colOf(n.kind) === 0 && (pv[n.id]||0) === 0; // workload à 0 pod
+
   const svgH = Mt + maxTot + Mb;
   const ribbon = (x0,ya0,yb0,x1,ya1,yb1,color) => { const xm=(x0+x1)/2;
     return `<path d="M${x0},${ya0} C${xm},${ya0} ${xm},${ya1} ${x1},${ya1} L${x1},${yb1} C${xm},${yb1} ${xm},${yb0} ${x0},${yb0} Z" fill="${color}" fill-opacity="0.3"/>`; };
   let s = `<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui" font-size="11">`;
-  // en-têtes de colonnes
-  for (let c = 0; c < 5; c++) s += `<text x="${colX(c)+nodeW/2}" y="${headY}" text-anchor="middle" fill="#8b949e" font-weight="600">${COLS[c]}</text>`;
-  // rubans
+  for (let c = 0; c < 4; c++) s += `<text x="${colX(c)+nodeW/2}" y="${headY}" text-anchor="middle" fill="#8b949e" font-weight="600">${COLS[c]}</text>`;
   for (const l of flinks) s += ribbon(pos[l.s].x+nodeW, l.sy0, l.sy1, pos[l.t].x, l.ty0, l.ty1, layerColor(byId[l.s].layer));
-  // nœuds + labels
-  for (let c = 0; c < 5; c++) for (const n of col[c]) {
+  for (let c = 0; c < 4; c++) for (const n of col[c]) {
     const p = pos[n.id], v = pv[n.id]||0;
-    const broken = v === 0 && (n.kind==="Service" || n.kind==="Ingress" || n.kind==="Deployment");
-    const cls = broken ? " class=\"bad\"" : "";
-    s += `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${layerColor(n.layer)}"${cls}><title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}</title></rect>`;
-    const tag = broken ? " ⚠︎0" : "";
-    if (c === 0) s += `<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" fill="#e6edf3">${esc(n.name)}${tag}</text>`;
-    else if (c === 3 || c === 4) s += `<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" fill="${broken?'#f85149':'#e6edf3'}">${esc(n.name)}${tag}</text>`;
+    const bad = isBad(n), idle = isIdle(n);
+    const cls = bad ? " class=\"bad\"" : idle ? " class=\"warn\"" : "";
+    const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
+    s += `<rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="3" fill="${layerColor(n.layer)}"${cls}><title>${esc(n.kind)}/${esc(n.name)} — ${v} pod${v>1?"s":""}${extra}</title></rect>`;
+    const tag = bad ? " ⚠︎0" : idle ? " ·0" : "";
+    const nsSuffix = ALL ? " · " + esc(n.namespace || "") : "";
+    const kindTag = colOf(n.kind)===0 && n.kind!=="Deployment" ? ` [${n.kind}]` : "";
+    if (c === 0) s += `<text x="${p.x-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" fill="${idle?'#e3b341':'#e6edf3'}">${esc(n.name)}${kindTag}${nsSuffix}${tag}</text>`;
+    else if (c === 2 || c === 3) s += `<text x="${p.x+nodeW+7}" y="${p.y+p.h/2}" dominant-baseline="middle" fill="${bad?'#f85149':'#e6edf3'}">${esc(n.name)}${nsSuffix}${tag}</text>`;
   }
   s += `</svg>`;
   host.innerHTML = s;
 
-  // Résumé ingress.
-  const ing = col[4]; const ok = ing.filter(n=>(pv[n.id]||0)>0).length;
-  const dep0 = col[0].filter(n=>(pv[n.id]||0)===0).length;
-  const svc0 = col[3].filter(n=>(pv[n.id]||0)===0).length;
-  let msg = `${ns} · ${col[0].length} deployments, ${col[2].length} pods`;
-  if (ing.length) msg += ` · ingress ${ok}/${ing.length} fonctionnels`;
-  if (svc0) msg += ` · ${svc0} service(s) sans pod`;
-  if (dep0) msg += ` · ${dep0} deployment(s) à 0`;
+  // Résumé.
+  const ing = col[3]; const okIng = ing.filter(n=>(pv[n.id]||0)>0).length;
+  const badSvc = col[2].filter(isBad).length;
+  const idleWl = col[0].filter(isIdle).length;
+  let msg = `${ALL ? "tout le cluster" : ns} · ${col[0].length} workloads, ${col[1].length} pods`;
+  if (ing.length) msg += ` · ingress ${okIng}/${ing.length} fonctionnels`;
+  if (badSvc) msg += ` · ${badSvc} service(s) cassé(s)`;
+  if (idleWl) msg += ` · ${idleWl} workload(s) à 0`;
   setStatus(msg);
 }
 
@@ -331,7 +354,7 @@ el("zfit").onclick=()=>cy.fit(cy.elements(),40);
 
 /* =================== Bascule =================== */
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow");
-  el("hint").textContent="Flux — ce qui découle de chaque Deployment : Deployment → ReplicaSet → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Un ingress sans flux entrant, un service ou deployment à 0 pod = marqué en rouge.";
+  el("hint").textContent="Flux — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
   try { const g=await ensureGraph(); fillNsPicker(g); renderFlow(g, el("ns-picker").value); }
   catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
