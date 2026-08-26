@@ -485,10 +485,17 @@ function renderInteractions(graph){
   const hideInfra = el("hide-infra").checked;
   const okNs = id => !hideInfra || !INFRA_NS.has(byId[id].namespace);
 
-  // Base DÉCLARÉE réseau : arêtes ALLOWS issues des NetworkPolicies (workload -> workload).
-  const allowedSet=new Set(), protectedWl=new Set(), nsWithPolicy=new Set();
+  // Base DÉCLARÉE réseau, issue des NetworkPolicies :
+  //   ALLOWS(src -> dst)   : connexion autorisée (ingress ou egress).
+  //   PROTECTS_IN(np -> w) : w est réellement isolé en ENTRÉE  → on juge qui l'appelle.
+  //   PROTECTS_OUT(np -> w): w est réellement isolé en SORTIE → on juge ce qu'il appelle.
+  const allowedSet=new Set(), ingressProtected=new Set(), egressProtected=new Set(), nsWithPolicy=new Set();
   for(const n of graph.nodes) if(n.kind==="NetworkPolicy") nsWithPolicy.add(n.namespace);
-  for(const e of graph.edges) if(e.type==="ALLOWS"){ allowedSet.add(e.source+"__"+e.target); protectedWl.add(e.target); }
+  for(const e of graph.edges){
+    if(e.type==="ALLOWS") allowedSet.add(e.source+"__"+e.target);
+    else if(e.type==="PROTECTS_IN") ingressProtected.add(e.target);
+    else if(e.type==="PROTECTS_OUT") egressProtected.add(e.target);
+  }
 
   // On assemble UNE seule carte : entrée (ingress→service→workload) + interactions.
   const nodeSet=new Set(), edges=[];
@@ -516,15 +523,17 @@ function renderInteractions(graph){
     const k=from+"__"+to; const p=pairs[k]||(pairs[k]={from,to,wlTo:(depWl||to),uses:false,talks:false}); if(e.type==="USES")p.uses=true; else p.talks=true;
     if(depSvc&&depWl&&depWl!==depSvc&&byId[depWl]&&okNs(depWl)){ nodeSet.add(depWl); backsDep.add(depSvc+"__"+depWl); }
   }
-  // Dérive réseau = trafic observé (talks) vers une cible PROTÉGÉE par une
-  // NetworkPolicy mais NON autorisé par elle. Conservateur : on ne juge que les
-  // cibles portant au moins une règle ALLOWS (protectedWl) → pas de faux-rouge
-  // là où il n'y a aucune policy.
+  // Dérive réseau = trafic RÉEL observé (talks) non autorisé, jugé UNIQUEMENT si
+  // un côté du flux est réellement isolé par une NetworkPolicy :
+  //   - la cible est protégée en ENTRÉE (ingressProtected), ou
+  //   - la source est protégée en SORTIE (egressProtected).
+  // Conservateur : aucun faux-rouge là où le trafic est ouvert (allow-all) ou non régi.
   const hasPolicy = nsWithPolicy.size>0;
   let nBoth=0,nUses=0,nTalks=0,nDrift=0;
   for(const p of Object.values(pairs)){ const st=p.uses&&p.talks?"both":p.talks?"talks":"uses";
     let drift=false;
-    if(st==="talks" && protectedWl.has(p.wlTo)) drift = !allowedSet.has(p.from+"__"+p.wlTo);
+    if(st==="talks" && (ingressProtected.has(p.wlTo) || egressProtected.has(p.from)))
+      drift = !allowedSet.has(p.from+"__"+p.wlTo);
     if(st==="both")nBoth++; else if(st==="talks")nTalks++; else nUses++;
     if(drift) nDrift++;
     edges.push({from:p.from,to:p.to,kind:"call",state:st,drift}); }

@@ -73,6 +73,12 @@ const (
 	EdgeUses     EdgeType = "USES"     // Workload -> Service référencé dans sa config (env/ConfigMap)
 	EdgeAllows   EdgeType = "ALLOWS"   // NetworkPolicy : connectivité autorisée (déclarée, pas observée)
 	EdgeTalksTo  EdgeType = "TALKS_TO" // Trafic RÉEL observé (conntrack/eBPF) : src -> dst
+
+	// Marqueurs d'isolation : une NetworkPolicy « protège » un workload dans un
+	// sens donné (Ingress/Egress). Sert à ne juger la dérive QUE sur les
+	// workloads réellement isolés (un « allow-all » ne protège pas).
+	EdgeProtectsIn  EdgeType = "PROTECTS_IN"  // NetworkPolicy -> workload isolé en ENTRÉE
+	EdgeProtectsOut EdgeType = "PROTECTS_OUT" // NetworkPolicy -> workload isolé en SORTIE
 )
 
 // Edge est une relation dirigée entre deux nœuds.
