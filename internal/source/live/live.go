@@ -148,6 +148,10 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 		edges = append(edges, ke...)
 	}
 
+	// Dépendances par config : workload -> service appelé (USES), déduites de
+	// env / args / command / ConfigMaps.
+	edges = append(edges, s.collectConfigDeps(ctx, deployments, statefulSets, daemonSets, services)...)
+
 	return nodes, edges, nil
 }
 

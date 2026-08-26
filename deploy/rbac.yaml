@@ -24,9 +24,10 @@ kind: ClusterRole
 metadata:
   name: kubegraph-readonly
 rules:
-  # Cœur : Pods et Services.
+  # Cœur : Pods, Services, ConfigMaps (les ConfigMaps servent au scan des
+  # dépendances de config — références de services par nom DNS).
   - apiGroups: [""]
-    resources: ["pods", "services"]
+    resources: ["pods", "services", "configmaps"]
     verbs: ["get", "list", "watch"]
   # Workloads : Deployments et ReplicaSets.
   - apiGroups: ["apps"]

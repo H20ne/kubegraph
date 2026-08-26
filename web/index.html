@@ -40,6 +40,10 @@
   #flow-wrap, #sankey-wrap { flex:1; min-height:0; overflow:auto; display:none; }
   body[data-mode="flow"] #flow-wrap { display:block; }
   body[data-mode="overview"] #sankey-wrap { display:block; }
+  #int-wrap { flex:1; min-height:0; display:none; position:relative; }
+  body[data-mode="interactions"] #int-wrap { display:block; }
+  #cyint { width:100%; height:100%; }
+  #int-empty { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--muted); font-size:13px; padding:0 40px; display:none; }
   #explore-wrap { flex:1; min-height:0; display:none; }
   body[data-mode="explore"] #explore-wrap { display:flex; }
   #cy { flex:1; min-height:0; }
@@ -66,6 +70,7 @@
     <span class="brand">kube<span>graph</span></span>
     <div class="tabs">
       <button id="tab-flow" class="active">Flux</button>
+      <button id="tab-interactions">Interactions</button>
       <button id="tab-overview">Vue d'ensemble</button>
       <button id="tab-explore">Explorer</button>
     </div>
@@ -87,6 +92,7 @@
 
   <div class="stage">
     <div id="flow-wrap"><div id="flow"></div></div>
+    <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div></div>
     <div id="sankey-wrap"><div id="sankey"></div></div>
     <div id="explore-wrap">
       <div id="cy"></div>
@@ -352,7 +358,51 @@ el("zin").onclick=()=>cy.zoom({level:cy.zoom()*1.3,renderedPosition:{x:cy.width(
 el("zout").onclick=()=>cy.zoom({level:cy.zoom()/1.3,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
 el("zfit").onclick=()=>cy.fit(cy.elements(),40);
 
+/* =================== INTERACTIONS — « qui parle à qui » =================== */
+const cyInt = cytoscape({ container: el("cyint"), minZoom:0.2, maxZoom:3, wheelSensitivity:0.25, style:[
+  { selector:"node", style:{ "background-color":e=>layerColor(e.data("layer")), "width":26, "height":26, "border-width":0,
+    "label":e=>e.data("label"), "font-size":10, "color":"#e6edf3", "text-valign":"bottom", "text-margin-y":5,
+    "text-background-color":"#161b22", "text-background-opacity":0.9, "text-background-shape":"roundrectangle", "text-background-padding":3, "min-zoomed-font-size":6 }},
+  { selector:"edge", style:{ "width":2, "line-color":"#f0883e", "target-arrow-color":"#f0883e", "target-arrow-shape":"triangle",
+    "curve-style":"bezier", "line-style":"dashed", "label":"data(kind)", "font-size":8, "color":"#f0883e", "text-rotation":"autorotate" }},
+  { selector:".faded", style:{ "opacity":0.12 }},
+]});
+window.addEventListener("resize", ()=>cyInt.resize());
+cyInt.on("mouseover","node",e=>{ const nb=e.target.closedNeighborhood(); cyInt.elements().addClass("faded"); nb.removeClass("faded"); });
+cyInt.on("mouseout","node",()=>cyInt.elements().removeClass("faded"));
+
+function renderInteractions(graph){
+  const byId={}; for(const n of graph.nodes) byId[n.id]=n;
+  const ownerOf={}; for(const e of graph.edges) if(e.type==="OWNED_BY") ownerOf[e.source]=e.target;
+  const top=id=>{let c=ownerOf[id],g=0;while(c&&g++<12){const k=byId[c]&&byId[c].kind;if(WKINDS.includes(k))return c;c=ownerOf[c];}return null;};
+  // Service -> workload qui le backe (via SELECTS -> pod -> contrôleur de tête).
+  const svcWl={}; for(const e of graph.edges) if(e.type==="SELECTS"){ const w=top(e.target); if(w&&!svcWl[e.source]) svcWl[e.source]=w; }
+  // Arêtes d'interaction : USES (config) et TALKS_TO (observé), remappées sur le workload cible.
+  const nodeSet=new Set(), links=[];
+  for(const e of graph.edges){ if(e.type!=="USES"&&e.type!=="TALKS_TO") continue;
+    const from=e.source, to=svcWl[e.target]||e.target;
+    if(from===to||!byId[from]||!byId[to]) continue;
+    nodeSet.add(from); nodeSet.add(to); links.push({from,to,kind:e.type==="USES"?"appelle":"trafic"});
+  }
+  const empty=el("int-empty");
+  if(!links.length){ cyInt.elements().remove(); empty.style.display="block";
+    empty.innerHTML="Aucune interaction détectée par la config.<br>Tes apps ne référencent peut-être pas les services par nom DNS dans <code>env</code>/<code>args</code> (IP en dur, découverte au runtime…). Le trafic <b>réel</b> viendra de l'agent eBPF (option B).";
+    setStatus("0 interaction (config)"); return; }
+  empty.style.display="none";
+  const els=[];
+  for(const id of nodeSet){ const n=byId[id]; els.push({group:"nodes",data:{id,label:`${n.kind}/${n.name}`,layer:n.layer}}); }
+  const seen=new Set();
+  for(const l of links){ const eid=`${l.from}__${l.to}`; if(seen.has(eid))continue; seen.add(eid);
+    els.push({group:"edges",data:{id:eid,source:l.from,target:l.to,kind:l.kind}}); }
+  cyInt.elements().remove(); cyInt.add(els);
+  cyInt.layout({name:"cose",animate:true,animationDuration:500,nodeRepulsion:8000,idealEdgeLength:120,padding:40}).run();
+  setStatus(`${nodeSet.size} composants · ${seen.size} interactions (config)`);
+}
+
 /* =================== Bascule =================== */
+async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions");
+  el("hint").textContent="Interactions — qui parle à qui, déduit de la config (env/args/ConfigMap → service). Les services sont collapsés sur leur workload. À venir : le trafic RÉEL (agent eBPF) et l'écart config↔trafic.";
+  try { renderInteractions(await ensureGraph()); cyInt.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow");
   el("hint").textContent="Flux — ce qui découle de chaque workload : Workload (Deployment/StatefulSet/DaemonSet) → Pod → Service → Ingress. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod.";
   try { const g=await ensureGraph(); fillNsPicker(g); renderFlow(g, el("ns-picker").value); }
@@ -363,11 +413,12 @@ async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab(
 async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore");
   el("hint").textContent="Explorer — choisis un départ puis Charger. Survole pour isoler les liens, clique pour le détail et déplier le cercle suivant.";
   try { fillPicker(await ensureNodes()); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
-function setTab(m){ for (const t of ["flow","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
-el("tab-flow").onclick=showFlow; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
+function setTab(m){ for (const t of ["flow","interactions","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
+el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
 el("ns-picker").onchange=()=>{ if(gGraph) renderFlow(gGraph, el("ns-picker").value); };
 el("refresh").onclick=async()=>{ gGraph=null; gNodes=null;
-  const m=document.body.dataset.mode; if(m==="flow") showFlow(); else if(m==="overview") showOverviewTab(); else showExplore(); };
+  const m=document.body.dataset.mode;
+  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="overview") showOverviewTab(); else showExplore(); };
 el("legend").innerHTML = Object.values(LAYER).map(l=>`<span class="chip"><span class="dot" style="background:${l.color}"></span>${l.label}</span>`).join("") + `<span class="chip" style="margin-left:8px"><span class="dot" style="background:var(--bad)"></span>0 pod / cassé</span>`;
 
 showFlow();
