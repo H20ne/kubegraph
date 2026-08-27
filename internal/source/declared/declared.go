@@ -21,6 +21,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/kubernetes/scheme"
 
@@ -69,6 +70,37 @@ func layerOf(kind string) graph.Layer {
 func Load(dir string) ([]Ident, error) {
 	dec := scheme.Codecs.UniversalDeserializer()
 	var out []Ident
+	// add décode UN document. Un « List » (ce que produit `kubectl get -o yaml`)
+	// est déroulé : chaque item est re-décodé. Le reste est ignoré silencieusement
+	// (CRD, type inconnu, non-K8s).
+	var add func(doc []byte)
+	add = func(doc []byte) {
+		if len(bytes.TrimSpace(doc)) == 0 {
+			return
+		}
+		obj, gvk, e := dec.Decode(doc, nil, nil)
+		if e != nil || gvk == nil {
+			return
+		}
+		if gvk.Kind == "List" {
+			if l, ok := obj.(*corev1.List); ok {
+				for _, it := range l.Items {
+					if len(it.Raw) > 0 {
+						add(it.Raw)
+					}
+				}
+			}
+			return
+		}
+		if !declarable[gvk.Kind] {
+			return
+		}
+		m, e := meta.Accessor(obj)
+		if e != nil {
+			return
+		}
+		out = append(out, Ident{Kind: gvk.Kind, Namespace: m.GetNamespace(), Name: m.GetName()})
+	}
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
@@ -83,21 +115,7 @@ func Load(dir string) ([]Ident, error) {
 			return nil // fichier illisible : non bloquant
 		}
 		for _, doc := range bytes.Split(b, []byte("\n---")) {
-			if len(bytes.TrimSpace(doc)) == 0 {
-				continue
-			}
-			obj, gvk, e := dec.Decode(doc, nil, nil)
-			if e != nil || gvk == nil {
-				continue // CRD / type inconnu / non-K8s : ignoré
-			}
-			if !declarable[gvk.Kind] {
-				continue
-			}
-			m, e := meta.Accessor(obj)
-			if e != nil {
-				continue
-			}
-			out = append(out, Ident{Kind: gvk.Kind, Namespace: m.GetNamespace(), Name: m.GetName()})
+			add(doc)
 		}
 		return nil
 	})

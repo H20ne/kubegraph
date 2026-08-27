@@ -43,19 +43,25 @@ func main() {
 	if gitDir := flagVal("--git-dir", "KUBEGRAPH_GITDIR"); gitDir != "" {
 		if decl, derr := declared.Load(gitDir); derr != nil {
 			log.Printf("source déclarée (%s) : %v (ignorée)", gitDir, derr)
+		} else if len(decl) == 0 {
+			log.Printf("source déclarée (%s) : 0 ressource déclarable lue — le dossier contient-il du YAML rendu (helm template / kustomize build / kubectl get -o yaml) ?", gitDir)
 		} else {
 			nodes = declared.ApplyDrift(src.ClusterID(), nodes, decl)
-			var missing, unmanaged int
+			var insync, missing, unmanaged int
 			for _, n := range nodes {
 				switch n.Drift {
+				case "insync":
+					insync++
 				case "missing":
 					missing++
 				case "unmanaged":
 					unmanaged++
 				}
 			}
-			fmt.Printf("gitops : %d déclaré(s) lus · %d manquant(s) · %d hors-Git\n", len(decl), missing, unmanaged)
+			fmt.Printf("gitops : %d déclaré(s) lus · %d en phase · %d manquant(s) · %d hors-Git — active « mode GitOps » dans le dashboard\n", len(decl), insync, missing, unmanaged)
 		}
+	} else {
+		fmt.Println("gitops : inactif — pour l'activer, fournis un dossier de YAML rendus : KUBEGRAPH_GITDIR=<dossier> ./run.sh  (génère-le vite avec ./run.sh --git-snapshot)")
 	}
 
 	counts := make(map[string]int)
