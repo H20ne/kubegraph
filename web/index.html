@@ -14,6 +14,9 @@
     --workload:#58a6ff; --networking:#3fb950; --config:#bc8cff; --security:#f85149; --unknown:#8b949e;
   }
   * { box-sizing:border-box; }
+  /* L'attribut hidden doit gagner : une règle d'auteur sur `label` ou `select`
+     l'écrase sinon silencieusement (display du navigateur = spécificité nulle). */
+  [hidden] { display:none !important; }
   html,body { height:100%; }
   body { margin:0; background:var(--bg); color:var(--text);
     font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
@@ -38,6 +41,11 @@
     transition:border-color .15s, background .15s, box-shadow .15s; }
   select:hover,input:hover { border-color:rgba(255,255,255,.17); }
   select:focus,input:focus { border-color:var(--ui); box-shadow:0 0 0 3px rgba(95,179,201,.16); }
+  /* Focus clavier visible : la règle partagée plus haut pose outline:none, il faut
+     le rendre à qui navigue au clavier — sinon on traverse l'interface à l'aveugle. */
+  button:focus-visible,select:focus-visible,input:focus-visible,[tabindex]:focus-visible {
+    outline:2px solid var(--ui); outline-offset:2px; border-radius:9px; }
+  .zones button:focus-visible,.lens button:focus-visible { outline-offset:-2px; }
   input[type=number]{ width:56px; }
   button { cursor:pointer; font-weight:600; }
   button:hover { border-color:var(--ui); background:rgba(95,179,201,.09); }
@@ -61,6 +69,89 @@
   .tabs button.active::after { content:""; position:absolute; left:12px; right:12px; bottom:3px;
     height:2px; border-radius:2px; background:linear-gradient(90deg,#5fb3c9,#8fe0f0);
     box-shadow:0 0 8px 1px rgba(95,179,201,.55); }
+  /* Zones (3) puis lentille de la zone active : l'utilisateur choisit d'abord
+     QUOI il regarde, ensuite SOUS QUEL ANGLE. */
+  .zones { display:inline-flex; gap:2px; padding:3px;
+    background:rgba(0,0,0,.28); border:1px solid rgba(255,255,255,.06);
+    border-radius:11px; box-shadow:0 1px 2px rgba(0,0,0,.4) inset; }
+  .zones button { height:auto; border:0; border-radius:8px; background:transparent;
+    padding:6px 15px; color:var(--muted); font-weight:600; font-size:12.5px; box-shadow:none;
+    transition:color .15s, background .15s; }
+  .zones button:hover { color:var(--text); background:rgba(255,255,255,.045); border-color:transparent; }
+  .zones button[aria-selected="true"] { color:#eafcff; font-weight:700; position:relative;
+    background:linear-gradient(180deg,#243244,#141b26);
+    box-shadow:0 1px 0 rgba(255,255,255,.08) inset, 0 0 0 1px rgba(95,179,201,.35),
+               0 7px 16px -10px rgba(95,179,201,.5); }
+  .zones button[aria-selected="true"]::after { content:""; position:absolute; left:12px; right:12px; bottom:3px;
+    height:2px; border-radius:2px; background:linear-gradient(90deg,#5fb3c9,#8fe0f0);
+    box-shadow:0 0 8px 1px rgba(95,179,201,.55); }
+  .lens { display:none; align-items:center; gap:3px; }
+  .lens.on { display:inline-flex; }
+  .lens .lens-lbl { font-size:10.5px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted);
+    font-weight:600; margin-right:5px; }
+  .lens button { height:27px; padding:0 11px; border-radius:7px; font-size:12px; font-weight:600;
+    background:transparent; border:1px solid transparent; color:var(--muted); }
+  .lens button:hover { color:var(--text); background:rgba(255,255,255,.05); border-color:transparent; }
+  .lens button.active { color:#d7f2f8; background:rgba(95,179,201,.13); border-color:rgba(95,179,201,.42); }
+  /* Indice de couleur sorti de la prose : une pastille se lit, une phrase se relit. */
+  .hint { display:flex; flex-wrap:wrap; align-items:baseline; gap:8px 14px; }
+  .hint .htext { flex:1 1 100%; }
+  .kchip { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:#aab6c6; }
+  .kchip .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  /* États de scène : chargement et panne, au centre, avec la marche à suivre. */
+  .stagemsg { position:absolute; inset:0; z-index:8; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:11px; padding:32px; text-align:center;
+    background:rgba(8,9,12,.82); }
+  .stagemsg h3 { margin:0; font-size:16px; font-weight:700; color:#e9edf3; }
+  .stagemsg p { margin:0; font-size:13px; line-height:1.6; color:#a3aebd; max-width:52ch; }
+  .stagemsg code { font:12px/1.5 "IBM Plex Mono",ui-monospace,monospace; color:#cdd6e2;
+    background:#0a0e14; border:1px solid rgba(255,255,255,.1); border-radius:7px;
+    padding:8px 12px; display:block; max-width:100%; overflow-x:auto; white-space:pre; text-align:left; }
+  .stagemsg .acts { display:flex; gap:9px; margin-top:3px; }
+  .stagemsg .ico { width:30px; height:30px; border-radius:50%; display:grid; place-items:center;
+    font-size:15px; background:rgba(255,255,255,.05); border:1px solid rgba(255,255,255,.1); }
+  .stagemsg.err .ico { color:var(--bad); border-color:rgba(248,81,73,.4); background:rgba(248,81,73,.09); }
+  .skel { display:flex; gap:11px; align-items:flex-end; height:78px; }
+  .skel i { display:block; width:15px; border-radius:4px; background:rgba(255,255,255,.09);
+    animation:pulse 1.15s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.28} 50%{opacity:.75} }
+  @media (prefers-reduced-motion:reduce){ .skel i { animation:none; opacity:.4 } }
+  /* Une fiche de constat mène quelque part : c'est le lien qui manquait. */
+  .sec-card[data-goto] { cursor:pointer; transition:border-color .13s, background .13s, transform .13s; }
+  .sec-card[data-goto]:hover { border-color:rgba(95,179,201,.5); background:rgba(95,179,201,.05); }
+  .sec-card[data-goto]:focus-visible { outline:2px solid var(--ui); outline-offset:2px; }
+  .sec-card .goto { grid-column:2/4; margin-top:9px; font-size:11.5px; font-weight:600; color:var(--ui);
+    opacity:0; transition:opacity .13s; }
+  .sec-card[data-goto]:hover .goto,.sec-card[data-goto]:focus-visible .goto { opacity:1; }
+  .sec-pill[data-filter] { cursor:pointer; user-select:none; transition:border-color .13s, opacity .13s; }
+  .sec-pill[data-filter]:hover { border-color:rgba(95,179,201,.5); }
+  .sec-pill[data-filter][aria-pressed="false"] { opacity:.4; }
+  .sec-pill[data-filter]:focus-visible { outline:2px solid var(--ui); outline-offset:2px; }
+  #sec-filter-clear { font-size:11.5px; height:28px; padding:0 10px; }
+  /* Nœud rejoint depuis un constat : halo bref pour dire « c'est celui-là ». */
+  @keyframes ping { 0%{opacity:.95;r:8} 100%{opacity:0;r:44} }
+  .pingdot { fill:none; stroke:#ff7b6b; stroke-width:2.5; animation:ping 1.5s ease-out 2; }
+  @media (prefers-reduced-motion:reduce){ .pingdot { animation:none; opacity:.8 } }
+  /* Palette de recherche : remplace le select de 169 options. */
+  #pal { position:fixed; inset:0; z-index:60; display:none; background:rgba(4,6,9,.62);
+    align-items:flex-start; justify-content:center; padding-top:11vh; }
+  #pal.open { display:flex; }
+  #pal .box { width:min(660px,92vw); background:#12161d; border:1px solid rgba(255,255,255,.12);
+    border-radius:13px; box-shadow:0 34px 80px -30px #000; overflow:hidden; }
+  #pal input { width:100%; height:50px; border:0; border-radius:0; font-size:15px; padding:0 17px;
+    background:transparent; border-bottom:1px solid rgba(255,255,255,.09); }
+  #pal input:focus { box-shadow:none; border-color:rgba(95,179,201,.5); }
+  #pal .list { max-height:min(52vh,430px); overflow-y:auto; padding:6px; }
+  #pal .grp { font-size:10px; font-weight:700; letter-spacing:.6px; text-transform:uppercase;
+    color:#7b8798; padding:9px 11px 4px; }
+  #pal .it { display:flex; align-items:center; gap:10px; padding:7px 11px; border-radius:8px; cursor:pointer; }
+  #pal .it .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  #pal .it .nm { font-size:13px; color:#e6edf3; }
+  #pal .it .ns { font-size:11.5px; color:#7b8798; margin-left:auto; font-family:"IBM Plex Mono",monospace; }
+  #pal .it[aria-selected="true"] { background:rgba(95,179,201,.16); box-shadow:0 0 0 1px rgba(95,179,201,.35) inset; }
+  #pal .none { padding:22px 14px; color:var(--muted); font-size:13px; text-align:center; }
+  #pal .foot { display:flex; gap:14px; padding:8px 14px; border-top:1px solid rgba(255,255,255,.07);
+    font-size:11px; color:#6b7688; font-family:"IBM Plex Mono",monospace; }
   #flow-controls, #explorer-controls, #int-controls, #sec-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
   body[data-mode="flow"] #flow-controls { display:flex; }
   body[data-mode="explore"] #explorer-controls { display:flex; }
@@ -81,8 +172,18 @@
   .hint { font-size:12px; color:var(--muted); padding:8px 16px 0; }
   .stage { flex:1; min-height:0; position:relative; display:flex; }
   /* Viewports pan/zoom : le schéma tient dans la fenêtre, molette=zoom, espace+glisser=déplacer. */
+  /* Un plan de fond quadrillé : le schéma repose sur une surface au lieu de
+     flotter dans le vide. Grille double (fine + large) pour donner l'échelle. */
+  .gridbg { background-color:#0a0d12;
+    background-image:
+      linear-gradient(rgba(125,155,185,.040) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(125,155,185,.040) 1px, transparent 1px),
+      linear-gradient(rgba(125,155,185,.055) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(125,155,185,.055) 1px, transparent 1px),
+      radial-gradient(ellipse 80% 60% at 50% 40%, rgba(95,179,201,.055), transparent 70%);
+    background-size:28px 28px, 28px 28px, 140px 140px, 140px 140px, 100% 100%; }
   #flow-wrap, #sankey-wrap, #access-wrap, #int-wrap {
-    flex:1; min-height:0; display:none; position:relative; overflow:hidden; background:#08090c; }
+    flex:1; min-height:0; display:none; position:relative; overflow:hidden; }
   /* Pas de will-change/layer GPU : sinon le SVG est rasterisé à 1x puis agrandi (flou).
      Sans promotion, le navigateur re-rend le vectoriel à chaque échelle → net au zoom. */
   #flow, #sankey, #access, #cyint { position:absolute; top:0; left:0; transform-origin:0 0; }
@@ -92,7 +193,7 @@
   body[data-mode="access"] #access-wrap { display:block; }
   body[data-mode="interactions"] #int-wrap { display:block; }
   /* Onglet Sécurité : rapport défilable (pas de pan/zoom). */
-  #sec-wrap { flex:1; min-height:0; overflow:auto; display:none; background:#0b0e13; padding:16px 20px 40px; }
+  #sec-wrap { flex:1; min-height:0; overflow:auto; display:none; position:relative; background:#0b0e13; padding:16px 20px 40px; }
   body[data-mode="security"] #sec-wrap { display:block; }
   .sec-sum { display:flex; gap:10px; flex-wrap:wrap; margin:0 0 18px; }
   .sec-pill { display:inline-flex; align-items:center; gap:7px; padding:7px 12px; border-radius:10px;
@@ -131,7 +232,17 @@
     padding:9px 11px; font:11.5px/1.5 "IBM Plex Mono",ui-monospace,monospace; color:#cdd6e2; white-space:pre; overflow-x:auto; }
   .sp-copy { margin-top:6px; font-size:11px; padding:4px 9px; height:26px; }
   .sp-none { font-size:12.5px; color:var(--muted); margin-top:8px; }
-  .pzhint { position:absolute; right:12px; bottom:10px; z-index:6; font-size:11px; color:#5b6472;
+  /* Remontée d'une chaîne d'escalade dans le panneau : chaque maillon, dans l'ordre. */
+  .atk-chain { margin:4px 0 16px; }
+  .atk-chain h4 { margin:0 0 9px; font-size:10px; font-weight:700; letter-spacing:.6px;
+    text-transform:uppercase; color:#7b8798; }
+  .ac-step { display:flex; align-items:center; gap:8px; font-size:12px; }
+  .ac-step i { width:8px; height:8px; border-radius:50%; flex:none; }
+  .ac-step .ac-r { font-size:9px; font-weight:700; letter-spacing:.4px; flex:none; min-width:74px; }
+  .ac-step .ac-l { color:#aeb8c6; word-break:break-word; }
+  .ac-step.cur .ac-l { color:#e9edf3; font-weight:700; }
+  .ac-link { width:1px; height:11px; background:#39424f; margin:2px 0 2px 3.5px; }
+  .pzhint { position:absolute; right:12px; bottom:10px; z-index:6; font-size:11px; color:#93a0b2;
     background:rgba(8,9,12,.7); border:1px solid rgba(255,255,255,.06); border-radius:7px; padding:4px 9px; pointer-events:none; }
   body.panning #flow-wrap, body.panning #int-wrap, body.panning #access-wrap, body.panning #sankey-wrap { cursor:grab; }
   /* Survol d'un flux : on éclaire toute la chaîne connectée (de bout en bout) et
@@ -141,7 +252,7 @@
   path.rib.flowhl { filter:brightness(1.5) saturate(1.12); }
   #cyint { width:100%; }
   #int-empty { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--muted); font-size:13px; padding:0 40px; display:none; }
-  #explore-wrap { flex:1; min-height:0; display:none; }
+  #explore-wrap { flex:1; min-height:0; display:none; position:relative; }
   body[data-mode="explore"] #explore-wrap { display:flex; }
   #cy { flex:1; min-height:0; }
   #attack-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
@@ -173,6 +284,11 @@
   .fnd .ft { font-weight:600; color:#e6edf3; }
   .fnd .fw { color:var(--muted); font-size:11px; margin-top:2px; }
   #picker-search { width:150px; }
+  #pal-open { display:inline-flex; align-items:center; gap:9px; min-width:250px; justify-content:space-between;
+    color:var(--muted); font-weight:500; }
+  #pal-open.set { color:var(--text); font-weight:600; }
+  #pal-open kbd { font:500 10.5px/1 "IBM Plex Mono",monospace; color:#8b949e; background:rgba(255,255,255,.06);
+    border:1px solid rgba(255,255,255,.09); border-radius:5px; padding:3px 6px; }
   .zoombar { position:absolute; left:14px; bottom:14px; display:flex; gap:6px; z-index:5; }
   .zoombar button { width:34px; height:34px; padding:0; font-size:16px; background:var(--panel); }
   #legend { padding:9px 16px; border-top:1px solid var(--border); display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--muted); align-items:center; }
@@ -186,15 +302,23 @@
 </head>
 <body data-mode="interactions">
   <header>
-    <span class="brand">kube<span>graph</span></span>
-    <div class="tabs">
-      <button id="tab-flow">Exécution</button>
-      <button id="tab-interactions" class="active">Réseau &amp; interactions</button>
-      <button id="tab-access">Accès &amp; identité</button>
-      <button id="tab-security">Sécurité</button>
-      <button id="tab-attack">Chemins d'attaque</button>
-      <button id="tab-overview">Vue d'ensemble</button>
-      <button id="tab-explore">Explorer</button>
+    <h1 class="brand">kube<span>graph</span></h1>
+    <nav class="zones" role="tablist" aria-label="Zones">
+      <button id="zone-map" role="tab" aria-selected="true" aria-controls="stage">Carte</button>
+      <button id="zone-sec" role="tab" aria-selected="false" aria-controls="stage">Sécurité</button>
+      <button id="zone-explore" role="tab" aria-selected="false" aria-controls="stage">Explorer</button>
+    </nav>
+    <div class="lens on" id="lens-map" role="group" aria-label="Lentille de la carte">
+      <span class="lens-lbl">lentille</span>
+      <button id="lens-interactions" class="active">Réseau</button>
+      <button id="lens-flow">Exécution</button>
+      <button id="lens-access">Identité</button>
+      <button id="lens-overview">Inventaire</button>
+    </div>
+    <div class="lens" id="lens-sec" role="group" aria-label="Vue sécurité">
+      <span class="lens-lbl">vue</span>
+      <button id="lens-security" class="active">Constats</button>
+      <button id="lens-attack">Chemins d'attaque</button>
     </div>
     <label>API <input id="api" type="text" value="http://localhost:8080" size="20"></label>
     <button id="refresh">Rafraîchir</button>
@@ -211,8 +335,9 @@
       <label class="switch"><input type="checkbox" id="git-mode"> mode GitOps</label>
     </span>
     <span id="explorer-controls">
-      <label>filtrer <input id="picker-search" type="text" placeholder="type, nom, ns…"></label>
-      <label>départ <select id="picker"><option value="">—</option></select></label>
+      <button id="pal-open" type="button" aria-haspopup="dialog">Rechercher un départ… <kbd>⌘K</kbd></button>
+      <label id="pick-lbl" hidden>filtrer <input id="picker-search" type="text"></label>
+      <label id="pick-sel" hidden>départ <select id="picker"><option value="">—</option></select></label>
       <label>profondeur <input id="depth" type="number" value="2" min="0" max="6"></label>
       <button id="load">Charger</button>
       <button id="reset">Reset</button>
@@ -222,20 +347,20 @@
       <label>entrée <select id="atk-entry"><option value="__all__">Toutes les entrées</option></select></label>
       <label class="switch"><input type="checkbox" id="atk-jewels" checked> chemins vers actif critique</label>
     </span>
-    <span id="status"></span>
+    <span id="status" role="status" aria-live="polite"></span>
   </header>
-  <div class="hint" id="hint"></div>
+  <div class="hint" id="hint" aria-live="polite"></div>
 
-  <div class="stage">
-    <div id="flow-wrap"><div id="flow"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
-    <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
-    <div id="access-wrap"><div id="access"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+  <div class="stage" id="stage" role="main">
+    <div id="flow-wrap" class="gridbg"><div id="flow"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="int-wrap" class="gridbg"><div id="cyint"></div><div id="int-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="access-wrap" class="gridbg"><div id="access"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="sec-wrap"><div id="sec"></div></div>
-    <div id="attack-wrap"><div id="acy"></div><div id="atk-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="attack-wrap"><div id="acy" class="gridbg"></div><div id="atk-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <aside id="sec-panel"><button id="sec-panel-x" title="Fermer">✕</button><div id="sec-panel-body"></div></aside>
-    <div id="sankey-wrap"><div id="sankey"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
+    <div id="sankey-wrap" class="gridbg"><div id="sankey"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="explore-wrap">
-      <div id="cy"></div>
+      <div id="cy" class="gridbg"></div>
       <div class="zoombar">
         <button id="zin" title="Zoom +">+</button>
         <button id="zout" title="Zoom −">−</button>
@@ -261,14 +386,28 @@
     </div>
   </div>
   <div id="legend"></div>
+  <div id="pal" role="dialog" aria-modal="true" aria-label="Rechercher un objet">
+    <div class="box">
+      <input id="pal-q" type="text" placeholder="Rechercher un objet — nom, type, namespace…" autocomplete="off" role="combobox" aria-expanded="true" aria-controls="pal-list">
+      <div class="list" id="pal-list" role="listbox" aria-label="Résultats"></div>
+      <div class="foot"><span>↑↓ naviguer</span><span>⏎ charger</span><span>Échap fermer</span></div>
+    </div>
+  </div>
 
 <script>
+// Une seule ontologie pour toute l'application : les mêmes mots dans la légende,
+// dans le panneau et dans la palette. L'utilisateur apprend le vocabulaire une fois.
 const LAYER = {
-  workload:{color:"#58a6ff",label:"workload"}, networking:{color:"#3fb950",label:"networking"},
-  config:{color:"#bc8cff",label:"config"}, storage:{color:"#d0a15e",label:"storage"},
-  security:{color:"#f85149",label:"security"}, infra:{color:"#e3b341",label:"infra"}, unknown:{color:"#8b949e",label:"unknown"},
+  workload:{color:"#58a6ff",label:"Charge de travail"}, networking:{color:"#3fb950",label:"Réseau"},
+  config:{color:"#bc8cff",label:"Configuration"}, storage:{color:"#d0a15e",label:"Stockage"},
+  security:{color:"#f85149",label:"Sécurité"}, infra:{color:"#e3b341",label:"Infrastructure"}, unknown:{color:"#8b949e",label:"Non classé"},
 };
+const layerLabel = l => (LAYER[l]||LAYER.unknown).label;
 const layerColor = l => (LAYER[l]||LAYER.unknown).color;
+const EDGE_FR = { OWNED_BY:"appartient à", SELECTS:"sélectionne", ROUTES_TO:"route vers",
+  SCALES:"pilote", TRIGGERS:"déclenche", USES:"utilise", ALLOWS:"autorise", TALKS_TO:"parle à",
+  PROTECTS_IN:"protège (entrée)", PROTECTS_OUT:"protège (sortie)", RUNS_AS:"s'exécute en tant que",
+  RUNS_ON:"s'exécute sur", GRANTS:"accorde", REFERENCES:"référence" };
 const el = id => document.getElementById(id);
 
 // --- Filtre d'affichage par catégorie de type (réduire/adapter la vue) ---
@@ -532,7 +671,7 @@ function renderFlow(graph, ns) {
   }
   let s = `<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
   s+=`<defs>${defs}</defs>`;
-  for (const ci of active) s += `<text x="${(colX(ci)+nodeW/2).toFixed(0)}" y="${headY}" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${COLDEFS[ci].head}</text>`;
+  for (const ci of active) s += `<text x="${(colX(ci)+nodeW/2).toFixed(0)}" y="${headY}" text-anchor="middle" fill="#8ea2c0" font-size="11" font-weight="600" letter-spacing="0.5">${COLDEFS[ci].head}</text>`;
   s += nsHdr+rib+nodes+labels+`</svg>`;
   host.innerHTML = s; fitHost(host);
 
@@ -594,7 +733,7 @@ function renderOverview(nodes) {
   nds+=`<rect x="${xC+nodeW-2.5}" y="${clBandY.toFixed(1)}" width="2.5" height="${clBandH.toFixed(1)}" rx="1.5" fill="#8b95a5" filter="url(#osoft)"/>`;
   nds+=`<rect x="${xC+nodeW-1.5}" y="${(clBandY+1).toFixed(1)}" width="1.5" height="${(clBandH-2).toFixed(1)}" fill="#dfe6f0"/>`;
   labels+=`<text x="${xC-9}" y="${(clBandY+13).toFixed(1)}" text-anchor="end" font-weight="700" font-size="12" fill="#e9edf3">${esc(cluster)}</text>`;
-  labels+=`<text x="${xC-9}" y="${(clBandY+28).toFixed(1)}" text-anchor="end" font-size="10" font-family="'IBM Plex Mono',monospace" fill="#565f70">${total} objets</text>`;
+  labels+=`<text x="${xC-9}" y="${(clBandY+28).toFixed(1)}" text-anchor="end" font-size="10" font-family="'IBM Plex Mono',monospace" fill="#8ea2c0">${total} objets</text>`;
   for (const ns of nsList){ const p=nsPos[ns];
     nds+=`<rect x="${xN}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${nsColor[ns]}"/>`;
     labels+=`<text x="${xN-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(ns)} · ${nsCount[ns]}</text>`; }
@@ -603,9 +742,9 @@ function renderOverview(nodes) {
     labels+=`<text x="${xK+nodeW+6}" y="${kp.y+kp.h/2}" dominant-baseline="middle" font-size="11" fill="#c9d1d9" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(k)} · ${nsKind[ns][k]}</text>`; }
   let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
   s+=`<defs>${defs}</defs>`;
-  s+=`<text x="${(xC+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">CLUSTER</text>`;
-  s+=`<text x="${(xN+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">NAMESPACES</text>`;
-  s+=`<text x="${(xK+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">TYPES</text>`;
+  s+=`<text x="${(xC+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#8ea2c0" font-size="11" font-weight="600" letter-spacing="0.5">CLUSTER</text>`;
+  s+=`<text x="${(xN+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#8ea2c0" font-size="11" font-weight="600" letter-spacing="0.5">NAMESPACES</text>`;
+  s+=`<text x="${(xK+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#8ea2c0" font-size="11" font-weight="600" letter-spacing="0.5">TYPES</text>`;
   s+=rib+nds+labels+`</svg>`;
   host.innerHTML=s; fitHost(host);
   setStatus(`${total} objets · ${nsList.length} namespaces`);
@@ -652,28 +791,46 @@ const cardW = e => { const t=(e.data("name")||""); return Math.min(238, Math.max
 const cy = cytoscape({
   container: el("cy"), minZoom:0.2, maxZoom:3, wheelSensitivity:0.25,
   style: [
-    { selector:"node", style:{ "shape":"round-rectangle", "background-color":"#12161d", "background-opacity":1,
-      "width":cardW, "height":46, "border-width":2, "border-color":e=>layerColor(e.data("layer")),
+    // Carte de nœud : dégradé vertical (la lumière vient d'en haut), coins doux,
+    // et un halo de la couleur de la couche qui détache la carte du fond.
+    { selector:"node", style:{ "shape":"round-rectangle", "corner-radius":9,
+      "background-fill":"linear-gradient", "background-gradient-direction":"to-bottom",
+      "background-gradient-stop-colors":"#161c25 #0e1218", "background-opacity":1,
+      "width":cardW, "height":48, "border-width":1.25, "border-color":e=>layerColor(e.data("layer")),
+      "border-opacity":0.62,
       "background-image":e=>iconURI(e.data("kind"),layerColor(e.data("layer"))),
-      "background-width":"20px","background-height":"20px","background-position-x":"13px","background-position-y":"50%",
+      "background-width":"19px","background-height":"19px","background-position-x":"13px","background-position-y":"50%",
       "background-clip":"none","background-fit":"none",
       "label":e=>`${e.data("name")}\n${e.data("kind")}`, "text-wrap":"wrap", "text-max-width":"156px",
-      "font-size":11, "font-weight":600, "color":"#e8eef5", "line-height":1.3,
+      "font-size":11, "font-weight":600, "color":"#eef3f9", "line-height":1.35,
       "text-valign":"center", "text-halign":"center", "text-margin-x":16, "min-zoomed-font-size":6 }},
     { selector:"node.nolbl", style:{ "text-opacity":0 }},
-    { selector:"node.seed", style:{ "border-width":3, "border-color":"#7fd3e3", "background-color":"#17202a" }},
-    { selector:"node.hl", style:{ "z-index":20, "border-width":3 }},
-    { selector:"edge", style:{ "width":2, "line-color":"#39424f", "curve-style":"taxi",
-      "taxi-direction":"auto", "taxi-turn":"46%", "taxi-turn-min-distance":"8px",
-      "target-arrow-shape":"triangle", "target-arrow-color":"#39424f", "arrow-scale":0.9,
-      "label":"", "font-size":8, "color":"#8b949e", "text-rotation":"none",
-      "text-background-color":"#0e1116", "text-background-opacity":1, "text-background-padding":2 }},
-    { selector:"edge.hl", style:{ "line-color":"#7fd3e3", "target-arrow-color":"#7fd3e3", "width":2.6, "label":"data(type)", "color":"#cbd5e1", "z-index":19 }},
-    // Flux animé : tirets qui défilent (posé seulement sur la chaîne survolée).
-    { selector:"edge.flowing", style:{ "line-style":"dashed", "line-dash-pattern":[9,7] }},
+    // La sélection se dit par la netteté du trait et la clarté du fond, pas par
+    // un aplat autour : Cytoscape ne sait pas flouter, un « halo » y est un pavé.
+    { selector:"node.seed", style:{ "border-width":1.75, "border-color":"#8fe0f0", "border-opacity":1,
+      "background-gradient-stop-colors":"#1b2833 #101820" }},
+    { selector:"node.hl", style:{ "z-index":20, "border-width":1.6, "border-opacity":1,
+      "background-gradient-stop-colors":"#1a212c #10151c" }},
+    // Arête : coudes arrondis, et le libellé posé sur une plaque bordée plutôt
+    // qu'en texte nu par-dessus le trait — c'est ce qui le rend lisible.
+    { selector:"edge", style:{ "width":1.8, "line-color":"#3d4959", "curve-style":"round-taxi", "radius":14,
+      "taxi-direction":"auto", "taxi-turn":"46%", "taxi-turn-min-distance":"12px",
+      "target-arrow-shape":"triangle-backcurve", "target-arrow-color":"#4a5768", "arrow-scale":1.0,
+      "label":"", "font-size":9, "font-family":"'IBM Plex Mono', ui-monospace, monospace",
+      "color":"#9aa7b8", "text-rotation":"none",
+      "text-background-color":"#0d1117", "text-background-opacity":0.96,
+      "text-background-shape":"roundrectangle", "text-background-padding":4,
+      "text-border-width":1, "text-border-color":"#2b3440", "text-border-opacity":1 }},
+    { selector:"edge.hl", style:{ "line-color":"#8fe0f0", "target-arrow-color":"#8fe0f0", "width":2.4,
+      "label":"data(fr)", "color":"#dff4fa", "z-index":19,
+      "underlay-color":"#5fb3c9", "underlay-opacity":0.16, "underlay-padding":2,
+      "text-background-color":"#0b1a20", "text-border-color":"#2d5b67" }},
+    // Flux animé : tirets qui défilent le long de la chaîne survolée (boucle rAF
+    // dans startFlow). Tirets courts et espacés serrés = sensation de courant.
+    { selector:"edge.flowing", style:{ "line-style":"dashed", "line-dash-pattern":[7,6] }},
     // Dépendances hors câblage standard (KEDA, config, netpol) : en évidence.
     { selector:'edge[type="SCALES"],edge[type="TRIGGERS"],edge[type="USES"],edge[type="ALLOWS"]',
-      style:{ "line-color":"#f0883e", "target-arrow-color":"#f0883e", "line-style":"dashed", "width":2, "label":"data(type)", "color":"#f0883e", "text-opacity":1 }},
+      style:{ "line-color":"#f0883e", "target-arrow-color":"#f0883e", "line-style":"dashed", "width":2, "label":"data(fr)", "color":"#f0883e", "text-opacity":1 }},
     { selector:".faded", style:{ "opacity":0.16 }},
   ],
 });
@@ -748,7 +905,7 @@ function relayout(){ const seed=cy.nodes(".seed");
   cy.layout({ name:"breadthfirst", roots: seed.nonempty()?seed:undefined, directed:false,
     spacingFactor:1.4, padding:40, animate:true, animationDuration:350, avoidOverlap:true, grid:false, nodeDimensionsIncludeLabels:true }).run(); }
 function applyLabelToggle(){ cy.nodes().toggleClass("nolbl", !el("showlabels").checked); }
-function merge(ego){ cy.batch(()=>{ for(const n of ego.nodes){ const ex=cy.getElementById(n.id); if(ex.nonempty()) ex.data("degree",Math.min(ex.data("degree"),n.degree)); else cy.add({group:"nodes",data:{...n}}); maxDegree=Math.max(maxDegree,n.degree);} for(const e of ego.edges){ const id=`${e.source}__${e.type}__${e.target}`; if(cy.getElementById(id).empty()) cy.add({group:"edges",data:{id,source:e.source,target:e.target,type:e.type}});}});
+function merge(ego){ cy.batch(()=>{ for(const n of ego.nodes){ const ex=cy.getElementById(n.id); if(ex.nonempty()) ex.data("degree",Math.min(ex.data("degree"),n.degree)); else cy.add({group:"nodes",data:{...n}}); maxDegree=Math.max(maxDegree,n.degree);} for(const e of ego.edges){ const id=`${e.source}__${e.type}__${e.target}`; if(cy.getElementById(id).empty()) cy.add({group:"edges",data:{id,source:e.source,target:e.target,type:e.type,fr:(EDGE_FR[e.type]||e.type)}});}});
   cy.getElementById(ego.root).addClass("seed"); applyLabelToggle(); applyExploreFilter(); relayout(); }
 // Filtre d'affichage (Explorer) : masque/affiche les nœuds par catégorie, et
 // masque toute arête touchant un nœud masqué. Non destructif (show/hide seulement).
@@ -794,15 +951,12 @@ function startFlow(){ if(_flowRaf) return; const step=()=>{ const es=cy.edges(".
 function stopFlow(){ if(_flowRaf){ cancelAnimationFrame(_flowRaf); _flowRaf=null; } cy.edges().removeClass("flowing"); }
 cy.on("mouseover","node",e=>litReach(e.target));
 cy.on("mouseout","node",()=>{ stopFlow(); cy.elements().removeClass("faded hl"); });
-cy.on("tap","node",async e=>{ const node=e.target; openPanel(node); try{ setStatus(`expansion de ${node.data("name")}…`); merge(await fetchEgo(node.data("cluster"),uidOf(node),1)); openPanel(node); setStatus(`${cy.nodes().length} nœuds affichés`);}catch(err){setStatus("erreur : "+err.message);} });
+cy.on("tap","node",async e=>{ const node=e.target; openPanel(node); try{ setStatus(`expansion de ${node.data("name")}…`); merge(await fetchEgo(node.data("cluster"),uidOf(node),1)); openPanel(node); setStatus(`${cy.nodes().length} nœuds affichés`);}catch(err){ stageError("explore",err); } });
 cy.on("tap",e=>{ if(e.target===cy) closePanel(); });
 // Libellés FR courts des types d'arête (pour la liste des relations).
-const EDGE_FR = { OWNED_BY:"appartient à", SELECTS:"sélectionne", ROUTES_TO:"route vers",
-  SCALES:"pilote", TRIGGERS:"déclenche", USES:"utilise", ALLOWS:"autorise", TALKS_TO:"parle à",
-  PROTECTS_IN:"protège (in)", PROTECTS_OUT:"protège (out)", RUNS_AS:"tourne comme", RUNS_ON:"tourne sur", GRANTS:"accorde", REFERENCES:"référence" };
 function openPanel(node){ el("panel-empty").style.display="none"; el("panel-body").style.display="block";
   el("p-kind").textContent=node.data("kind"); el("p-name").textContent=node.data("name"); el("p-ns").textContent=node.data("namespace")||"—";
-  const lp=el("p-layer"); lp.textContent=node.data("layer"); lp.style.background=layerColor(node.data("layer"));
+  const lp=el("p-layer"); lp.textContent=layerLabel(node.data("layer")); lp.style.background=layerColor(node.data("layer"));
   // Rayon d'impact (toute la chaîne, pas les voisins directs).
   const {up,down}=reachIds(node); el("p-up").textContent=up.size; el("p-down").textContent=down.size;
   // Relations directes, groupées par sens, avec le type traduit.
@@ -823,9 +977,9 @@ function openPanel(node){ el("panel-empty").style.display="none"; el("panel-body
       +`<div class="ft">${esc(f.title)} <span style="color:${SEV_COLOR[f.severity]};font-size:10px">· ${SEV_LABEL[f.severity]}</span></div>`
       +`<div class="fw">${esc(f.why||"")}</div></div>`).join("");
   } else fs.style.display="none";
-  el("p-focus").onclick=async()=>{ try{ cy.elements().remove(); maxDegree=0; merge(await fetchEgo(node.data("cluster"),uidOf(node),parseInt(el("depth").value,10))); cy.fit(cy.elements(),40); openPanel(cy.getElementById(node.id())); }catch(err){setStatus("erreur : "+err.message);} }; }
+  el("p-focus").onclick=async()=>{ try{ cy.elements().remove(); maxDegree=0; merge(await fetchEgo(node.data("cluster"),uidOf(node),parseInt(el("depth").value,10))); cy.fit(cy.elements(),40); openPanel(cy.getElementById(node.id())); }catch(err){ stageError("explore",err); } }; }
 function closePanel(){ el("panel-body").style.display="none"; el("panel-empty").style.display="block"; }
-el("load").onclick=async()=>{ if(!el("picker").value) return; try{ const {cluster,id}=JSON.parse(el("picker").value); cy.elements().remove(); maxDegree=0; closePanel(); merge(await fetchEgo(cluster,id.slice(cluster.length+1),parseInt(el("depth").value,10))); cy.fit(cy.elements(),40); setStatus(`${cy.nodes().length} nœuds affichés`);}catch(e){setStatus("erreur : "+e.message);} };
+el("load").onclick=async()=>{ if(!el("picker").value) return; try{ const {cluster,id}=JSON.parse(el("picker").value); const n=(_pickNodes||[]).find(x=>x.id===id); if(n) return loadSeed(n); cy.elements().remove(); maxDegree=0; closePanel(); merge(await fetchEgo(cluster,id.slice(cluster.length+1),parseInt(el("depth").value,10))); cy.fit(cy.elements(),40); setStatus(`${cy.nodes().length} nœuds affichés`);}catch(e){ stageError("explore",e); } };
 el("reset").onclick=()=>{ cy.elements().remove(); maxDegree=0; closePanel(); setStatus("réinitialisé"); };
 el("showlabels").onchange=applyLabelToggle;
 el("picker-search").oninput=()=>renderPicker(el("picker-search").value);
@@ -968,22 +1122,31 @@ function scoreEntries(atk){
 // Cytoscape dédié aux chemins d'attaque (mêmes cartes + coudes + flux que l'Explorer).
 const acy = cytoscape({ container: el("acy"), minZoom:0.2, maxZoom:3, wheelSensitivity:0.25,
   style: [
-    { selector:"node", style:{ "shape":"round-rectangle", "background-color":"#12161d", "background-opacity":1,
-      "width":cardW, "height":46, "border-width":2, "border-color":e=>ATK_COLOR[e.data("role")]||"#6b7688",
+    { selector:"node", style:{ "shape":"round-rectangle", "corner-radius":9,
+      "background-fill":"linear-gradient", "background-gradient-direction":"to-bottom",
+      "background-gradient-stop-colors":"#161c25 #0e1218", "background-opacity":1,
+      "width":cardW, "height":48, "border-width":1.25, "border-opacity":0.62,
+      "border-color":e=>ATK_COLOR[e.data("role")]||"#6b7688",
       "background-image":e=>iconURI(e.data("kind"),ATK_COLOR[e.data("role")]||"#8b949e"),
-      "background-width":"20px","background-height":"20px","background-position-x":"13px","background-position-y":"50%",
+      "background-width":"19px","background-height":"19px","background-position-x":"13px","background-position-y":"50%",
       "background-clip":"none","background-fit":"none",
       "label":e=>`${e.data("label")}\n${e.data("sub")||""}`, "text-wrap":"wrap", "text-max-width":"150px",
-      "font-size":11, "font-weight":600, "color":"#e8eef5", "line-height":1.3,
+      "font-size":11, "font-weight":600, "color":"#eef3f9", "line-height":1.35,
       "text-valign":"center", "text-halign":"center", "text-margin-x":16, "min-zoomed-font-size":6 }},
-    { selector:'node[?jewel]', style:{ "border-width":3, "border-color":"#ef4444" }},
-    { selector:"edge", style:{ "width":2.4, "line-color":e=>SEV_COLOR[e.data("sev")]||"#39424f", "curve-style":"taxi",
+    // L'actif critique est la cible : son halo doit se voir de loin.
+    // L'actif critique : trait net et plein, sans aplat rouge par-dessus un fond
+    // rouge par-dessus une bordure rouge. Un seul rouge, bien placé.
+    { selector:'node[?jewel]', style:{ "border-width":1.75, "border-color":"#ff6b5e", "border-opacity":1 }},
+    { selector:"edge", style:{ "width":2.2, "line-color":e=>SEV_COLOR[e.data("sev")]||"#39424f", "curve-style":"round-taxi", "radius":14, "text-margin-y":-10,
       "taxi-direction":"horizontal", "taxi-turn":"40%", "taxi-turn-min-distance":"8px",
       "target-arrow-shape":"triangle", "target-arrow-color":e=>SEV_COLOR[e.data("sev")]||"#39424f", "arrow-scale":0.9,
-      "line-style":"dashed", "line-dash-pattern":[9,7],
-      "label":"data(tech)", "font-size":8.5, "color":"#9fb0c4", "text-rotation":"none",
-      "text-background-color":"#0e1116", "text-background-opacity":1, "text-background-padding":2 }},
-    { selector:".atkfade", style:{ "opacity":0.12 }},
+      "line-style":"dashed", "line-dash-pattern":[7,6],
+      "label":"data(tech)", "font-size":9, "font-family":"'IBM Plex Mono', ui-monospace, monospace",
+      "color":"#a8b6c8", "text-rotation":"none",
+      "text-background-color":"#0d1117", "text-background-opacity":0.96,
+      "text-background-shape":"roundrectangle", "text-background-padding":4,
+      "text-border-width":1, "text-border-color":"#2b3440", "text-border-opacity":1 }},
+    { selector:".atkfade", style:{ "opacity":0.10 }},
   ],
 });
 let _atk=null, _atkDash=0, _atkRaf=null;
@@ -1011,9 +1174,50 @@ function renderAttack(){
   acy.add(_atk.nodes.map(n=>({group:"nodes",data:n})));
   acy.add(_atk.edges.map(e=>({group:"edges",data:e})));
   // Placement en colonnes par rôle (flux gauche → droite).
-  const colW=270, byCol={}; acy.nodes().forEach(n=>{ const c=ATK_COL[n.data("role")]??2; (byCol[c]=byCol[c]||[]).push(n); });
-  Object.keys(byCol).forEach(c=>{ byCol[c].forEach((n,i)=>{ n.position({x:c*colW, y:i*84}); }); });
-  acy.layout({name:"preset",fit:true,padding:40,animate:false}).run();
+  const colW=360, rowH=98;
+  const byCol={}; acy.nodes().forEach(n=>{ const c=ATK_COL[n.data("role")]??2; (byCol[c]=byCol[c]||[]).push(n); });
+  const cols=Object.keys(byCol).map(Number).sort((a,b)=>a-b);
+  const order={}; cols.forEach(c=>{ order[c]=byCol[c].slice(); });
+  const place=()=>cols.forEach(c=>order[c].forEach((n,i)=>n.position({x:c*colW, y:i*rowH})));
+  place();
+  // Réduction de croisements par barycentre : un nœud se replace en face de la
+  // moyenne de ses voisins. Passes alternées amont/aval — c'est l'étape qui
+  // dénoue les faisceaux, sans quoi les flux se recouvrent et rien n'est lisible.
+  const bary=(n,dir)=>{ const ns = dir==="in" ? n.incomers("node") : n.outgoers("node");
+    if(!ns.length) return n.position("y");
+    let sum=0; ns.forEach(x=>{ sum+=x.position("y"); }); return sum/ns.length; };
+  for(let pass=0; pass<6; pass++){
+    const seq = pass%2===0 ? cols : cols.slice().reverse();
+    const dir = pass%2===0 ? "in" : "out";
+    for(const c of seq) order[c].sort((a,b)=>bary(a,dir)-bary(b,dir));
+    place();
+  }
+  // Chaque arête reçoit SON point de coude : à 46 % pour toutes, les segments
+  // verticaux se superposent en un seul couloir illisible.
+  const bySrc={};
+  acy.edges().forEach(e=>{ const c=ATK_COL[e.source().data("role")]??2; (bySrc[c]=bySrc[c]||[]).push(e); });
+  Object.values(bySrc).forEach(list=>{ const n=list.length;
+    list.forEach((e,i)=>{ e.style("taxi-turn", (n===1 ? 50 : 16 + (68*i)/(n-1)).toFixed(1)+"%"); }); });
+  // Cinq arêtes identiques convergeant sur le même nœud écrivent cinq fois le
+  // même mot. On ne le dit qu'une fois, porté par l'arête médiane, avec son compte.
+  const same={};
+  acy.edges().forEach(e=>{ const k=e.target().id()+"|"+(e.data("tech")||""); (same[k]=same[k]||[]).push(e); });
+  Object.values(same).forEach(list=>{
+    if(list.length<2) return;
+    list.sort((a,b)=>a.source().position("y")-b.source().position("y"));
+    const mid=list[Math.floor(list.length/2)];
+    list.forEach(e=>{ if(e!==mid) e.style("label",""); });
+    mid.style("label", `${mid.data("tech")||""} ×${list.length}`);
+  });
+  // Deux nœuds sur la même ligne : les allers et retours se recouvrent au pixel
+  // près. On décale les extrémités de part et d'autre de l'axe.
+  acy.edges().forEach(e=>{
+    if(Math.abs(e.source().position("y")-e.target().position("y"))>2) return;
+    const back = e.source().position("x") > e.target().position("x");
+    const off = back ? "18%" : "-18%";
+    e.style({"source-endpoint":"0% "+off, "target-endpoint":"0% "+off});
+  });
+  acy.layout({name:"preset",fit:true,padding:44,animate:false}).run();
   atkStopFlow(); atkFlow();
   applyAtkFilter();
   const jewels=_atk.nodes.filter(n=>n.jewel).length, ent=_atk.entries.length;
@@ -1038,7 +1242,66 @@ function applyAtkFilter(){
 }
 el("atk-entry").onchange=applyAtkFilter;
 el("atk-jewels").onchange=applyAtkFilter;
-acy.on("tap","node",e=>{ const d=e.target.data(); if(d.why) setStatus(`${d.label} — ${d.why}`); });
+// Cliquer un maillon ouvre son dossier : le rôle dans la chaîne, la remontée
+// jusqu'à l'entrée, le pourquoi, et — si le maillon est un objet réel du
+// cluster — ses constats avec correctif et YAML. Une ligne de statut ne suffit pas.
+function atkChainTo(node){
+  const chain=[]; let cur=node, guard=0;
+  while(cur && guard++<12){
+    chain.unshift(cur.data());
+    const inc=cur.incomers("node");
+    if(!inc.length) break;
+    // on remonte par le prédécesseur le plus grave (le pire cas d'abord)
+    let best=inc[0]; inc.forEach(x=>{ if((SEV[x.data("sev")]||0)>(SEV[best.data("sev")]||0)) best=x; });
+    cur=best;
+  }
+  return chain;
+}
+function openAtkPanel(nodeEle){
+  const n=nodeEle.data(), col=ATK_COLOR[n.role]||"#8b949e", sev=n.sev||"info";
+  const sevCol=SEV_COLOR[sev]||col;
+  let html=`<div class="sp-kind" style="color:${col}">${ATK_ROLE_LABEL[n.role]||esc(n.role||"")}</div>`
+    +`<div class="sp-name">${esc(n.label||"")}</div>`
+    +`<div class="sp-ns">${esc(n.sub||"")}${n.jewel?' · <b style="color:#ef4444">actif critique</b>':""}</div>`;
+  const chain=atkChainTo(nodeEle);
+  if(chain.length>1){
+    html+=`<div class="atk-chain"><h4>Remontée depuis l'entrée</h4>`;
+    chain.forEach((c,i)=>{ const cc=ATK_COLOR[c.role]||"#8b949e";
+      html+=`<div class="ac-step${c.id===n.id?" cur":""}"><i style="background:${cc}"></i>`
+        +`<span class="ac-r" style="color:${cc}">${ATK_ROLE_LABEL[c.role]||""}</span>`
+        +`<span class="ac-l">${esc(c.label||"")}</span></div>`;
+      if(i<chain.length-1) html+=`<div class="ac-link"></div>`; });
+    html+=`</div>`;
+  }
+  if(n.why) html+=`<div class="sp-f" style="border-left:4px solid ${sevCol};padding-left:10px">`
+    +`<h4>Pourquoi c'est un maillon <span class="sev-tag" style="background:${sevCol};font-size:9.5px;padding:2px 7px">${SEV_LABEL[sev]||sev}</span></h4>`
+    +`<div class="why">${esc(n.why)}</div></div>`;
+  if(n.real){
+    const fs=(gFindings||[]).filter(f=>f.node===n.real||f.peer===n.real).sort((a,b)=>SEV[b.severity]-SEV[a.severity]);
+    for(const f of fs){ const c2=SEV_COLOR[f.severity]||SEC_GREY, r=recoFor(f);
+      html+=`<div class="sp-f" style="border-left:4px solid ${c2};padding-left:10px">`
+        +`<h4>${esc(f.title)} <span class="sev-tag" style="background:${c2};font-size:9.5px;padding:2px 7px">${SEV_LABEL[f.severity]||f.severity}</span></h4>`
+        +`<div class="why">${esc(f.why)}</div><div class="ref">↳ ${esc(f.ref)}</div>`;
+      if(r.reco) html+=`<div class="sp-reco"><b>Recommandation.</b> ${r.reco}</div>`;
+      if(r.yaml){ const yid="y"+(_yc++); _secYaml[yid]=r.yaml;
+        html+=`<div class="sp-yaml">${esc(r.yaml)}</div><button class="sp-copy" data-copy="${yid}">Copier le YAML</button>`; }
+      html+=`</div>`; }
+    if(!fs.length) html+=`<div class="sp-none">Aucun constat isolé sur cet objet : il est ici comme relais de la chaîne.</div>`;
+    html+=`<button class="full" data-atk-map="${esc(n.real)}">Voir sur la carte</button>`;
+  } else {
+    html+=`<div class="sp-none">Maillon déduit — il ne correspond pas à un objet unique du cluster, mais à une capacité obtenue le long du chemin.</div>`;
+  }
+  el("sec-panel-body").innerHTML=html;
+  el("sec-panel").classList.add("open");
+}
+acy.on("tap","node",e=>openAtkPanel(e.target));
+acy.on("tap",e=>{ if(e.target===acy) closeSecPanel(); });
+document.addEventListener("click", ev=>{
+  const b=ev.target.closest && ev.target.closest("[data-atk-map]");
+  if(b){ const id=b.getAttribute("data-atk-map");
+    const f=(gFindings||[]).find(x=>x.node===id);
+    gotoFinding(id, f?f.category:"network"); }
+});
 
 /* =================== INTERACTIONS — Sankey en couloirs « qui parle à qui » =================== */
 // Services d'infra ubiquitaires (API, DNS) et namespaces d'infra : « tout le
@@ -1209,7 +1472,7 @@ function renderInteractions(graph){
     const kindLbl=esc(n.kind.toLowerCase()), nsLbl=esc(n.namespace||"");
     if(layer[id]===0){
       labels+=`<text x="${P.x-11}" y="${P.y+P.h/2-1}" text-anchor="end" fill="#e9edf3" font-weight="600" font-size="12">${nm}</text>`;
-      labels+=`<text x="${P.x-11}" y="${P.y+P.h/2+12}" text-anchor="end" fill="#565f70" font-size="9" font-family="'IBM Plex Mono',monospace">${kindLbl}${nsLbl?" · "+nsLbl:""}</text>`;
+      labels+=`<text x="${P.x-11}" y="${P.y+P.h/2+12}" text-anchor="end" fill="#8ea2c0" font-size="9" font-family="'IBM Plex Mono',monospace">${kindLbl}${nsLbl?" · "+nsLbl:""}</text>`;
     } else {
       const suffix=" · "+kindLbl, wpx=(nm.length+suffix.length)*6.6+18;
       labels+=`<rect x="${(cx-wpx/2).toFixed(1)}" y="${ly-13}" width="${wpx.toFixed(1)}" height="17" rx="5" fill="rgba(8,10,16,.85)" stroke="rgba(255,255,255,.09)"/>`;
@@ -1218,8 +1481,8 @@ function renderInteractions(graph){
   }
   let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui">`;
   s+=`<defs>${defs}</defs>`;
-  s+=`<text x="${leftPad-2}" y="24" fill="#565f70" font-size="11" font-weight="600">← apps / entrée</text>`;
-  s+=`<text x="${W-rightPad}" y="24" fill="#565f70" font-size="11" font-weight="600" text-anchor="end">dépendances appelées →</text>`;
+  s+=`<text x="${leftPad-2}" y="24" fill="#8ea2c0" font-size="11" font-weight="600">← apps / entrée</text>`;
+  s+=`<text x="${W-rightPad}" y="24" fill="#8ea2c0" font-size="11" font-weight="600" text-anchor="end">dépendances appelées →</text>`;
   s+=rib+nodes+labels+`</svg>`;
   host.innerHTML=s; fitHost(host);
 
@@ -1307,7 +1570,7 @@ function renderAccess(graph){
   const svgH=Mt+maxTot+Mb;
   const heads=["SECRETS","WORKLOAD","SERVICEACCOUNT","RÔLES"];
   let s=`<svg width="${W}" height="${svgH}" viewBox="0 0 ${W} ${svgH}" font-family="system-ui"><defs>${defs}</defs>`;
-  for(let c=0;c<4;c++) s+=`<text x="${(colX(c)+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#565f70" font-size="11" font-weight="600" letter-spacing="0.5">${heads[c]}</text>`;
+  for(let c=0;c<4;c++) s+=`<text x="${(colX(c)+nodeW/2).toFixed(0)}" y="24" text-anchor="middle" fill="#8ea2c0" font-size="11" font-weight="600" letter-spacing="0.5">${heads[c]}</text>`;
   s+=rib+nodes+labels+`</svg>`;
   host.innerHTML=s; fitHost(host);
   setStatus(`${col[1].length} workloads · ${col[2].length} ServiceAccounts · ${col[3].length} rôles · ${col[0].length} secrets référencés`);
@@ -1380,36 +1643,82 @@ function secEdgeCol(a,b, fallback){
   if(gitMode) return "#242a34";
   return fallback; }
 
+// Filtres du rapport : les pastilles de gravité sont des commandes, pas de la décoration.
+let secFilter=new Set(), secQuery="";
 function renderSecurity(graph){
   const host=el("sec");
   const byId={}; for(const n of graph.nodes) byId[n.id]=n;
-  const list=(secIndex&&secIndex.list)||[];
-  if(!list.length){ host.innerHTML='<div id="sec-empty">Aucun point d\'attention sur les règles actuelles. Ce calque couvre durcissement pod, RBAC/escalation, exposition et dérive réseau — ce n\'est pas un scanner exhaustif (compléter avec kube-bench / kubescape / Trivy).</div>'; setStatus("sécurité : 0 point d'attention"); return; }
-  const cnt={}; for(const f of list) cnt[f.severity]=(cnt[f.severity]||0)+1;
+  const all=(secIndex&&secIndex.list)||[];
+  if(!all.length){ host.innerHTML='<div id="sec-empty">Aucun point d\'attention sur les règles actuelles. Ce calque couvre durcissement pod, RBAC/escalation, exposition et dérive réseau — ce n\'est pas un scanner exhaustif (compléter avec kube-bench / kubescape / Trivy).</div>'; setStatus("sécurité : 0 point d'attention"); return; }
+  const cnt={}; for(const f of all) cnt[f.severity]=(cnt[f.severity]||0)+1;
   const order=["critical","high","medium","low","info"];
-  let sum='<div class="sec-sum">';
-  for(const s of order) if(cnt[s]) sum+=`<span class="sec-pill"><span class="dot" style="background:${SEV_COLOR[s]}"></span><b>${cnt[s]}</b> ${SEV_LABEL[s]}</span>`;
-  sum+='</div>';
   const nm=id=>{ const n=byId[id]; return n?`${esc(n.name)}${n.namespace?" · "+esc(n.namespace):""}`:esc(id); };
   const kd=id=>{ const n=byId[id]; return n?esc(n.kind)+" ":""; };
-  const cats={}; for(const f of list){ (cats[f.category]=cats[f.category]||[]).push(f); }
-  const catOrder=Object.keys(cats).sort((a,b)=> Math.max(...cats[b].map(f=>SEV[f.severity])) - Math.max(...cats[a].map(f=>SEV[f.severity])));
+  const q=secQuery.trim().toLowerCase();
+  const list=all.filter(f=>{
+    if(secFilter.size && !secFilter.has(f.severity)) return false;
+    if(!q) return true;
+    const n=byId[f.node]||{}, pz=byId[f.peer]||{};
+    return `${f.title} ${f.why} ${f.ref} ${n.name||""} ${n.namespace||""} ${n.kind||""} ${pz.name||""}`.toLowerCase().includes(q);
+  });
+
+  let head='<div class="sec-sum">';
+  for(const s2 of order) if(cnt[s2]){
+    const on = !secFilter.size || secFilter.has(s2);
+    head+=`<span class="sec-pill" role="button" tabindex="0" data-filter="${s2}" aria-pressed="${on}" `
+      +`title="N'afficher que la gravité « ${SEV_LABEL[s2]} »"><span class="dot" style="background:${SEV_COLOR[s2]}"></span>`
+      +`<b>${cnt[s2]}</b> ${SEV_LABEL[s2]}</span>`;
+  }
+  if(secFilter.size||q) head+=`<button type="button" id="sec-filter-clear">Tout afficher</button>`;
+  head+='</div>';
+  head+=`<label style="display:flex;margin:0 0 16px"><input id="sec-q" type="text" placeholder="Filtrer les constats — objet, namespace, règle…" `
+    +`value="${esc(secQuery)}" style="flex:1;max-width:420px;text-transform:none;letter-spacing:0"></label>`;
+
   let bodyHtml="";
-  for(const c of catOrder){
-    bodyHtml+=`<div class="sec-grp">${CAT_LABEL[c]||c} · ${cats[c].length}</div>`;
-    for(const f of cats[c]){
-      const col=SEV_COLOR[f.severity]||SEC_GREY;
-      const tgt = f.peer ? `${kd(f.node)}<b style="color:#cdd6e2">${nm(f.node)}</b> → ${kd(f.peer)}<b style="color:#cdd6e2">${nm(f.peer)}</b>` : `${kd(f.node)}<b style="color:#cdd6e2">${nm(f.node)}</b>`;
-      bodyHtml+=`<div class="sec-card"><span class="sec-bar" style="background:${col}"></span>`
-        +`<div><h4>${esc(f.title)}</h4><div class="why">${esc(f.why)}</div>`
-        +`<div class="meta">${tgt}</div><div class="ref">↳ ${esc(f.ref)}</div></div>`
-        +`<span class="sev-tag" style="background:${col}">${SEV_LABEL[f.severity]||f.severity}</span></div>`;
+  if(!list.length){ bodyHtml=`<div id="sec-empty">Aucun constat ne correspond à ce filtre.</div>`; }
+  else {
+    const cats={}; for(const f of list){ (cats[f.category]=cats[f.category]||[]).push(f); }
+    const catOrder=Object.keys(cats).sort((a,b)=> Math.max(...cats[b].map(f=>SEV[f.severity])) - Math.max(...cats[a].map(f=>SEV[f.severity])));
+    for(const c of catOrder){
+      bodyHtml+=`<div class="sec-grp">${CAT_LABEL[c]||c} · ${cats[c].length}</div>`;
+      for(const f of cats[c]){
+        const col=SEV_COLOR[f.severity]||SEC_GREY;
+        const tgt = f.peer ? `${kd(f.node)}<b style="color:#cdd6e2">${nm(f.node)}</b> → ${kd(f.peer)}<b style="color:#cdd6e2">${nm(f.peer)}</b>` : `${kd(f.node)}<b style="color:#cdd6e2">${nm(f.node)}</b>`;
+        bodyHtml+=`<div class="sec-card" data-goto="${esc(f.node)}" data-cat="${esc(f.category)}" role="button" tabindex="0" `
+          +`aria-label="${esc(f.title)} — ouvrir sur la carte">`
+          +`<span class="sec-bar" style="background:${col}"></span>`
+          +`<div><h4>${esc(f.title)}</h4><div class="why">${esc(f.why)}</div>`
+          +`<div class="meta">${tgt}</div><div class="ref">↳ ${esc(f.ref)}</div></div>`
+          +`<span class="sev-tag" style="background:${col}">${SEV_LABEL[f.severity]||f.severity}</span>`
+          +`<div class="goto">→ voir sur la carte</div></div>`;
+      }
     }
   }
-  host.innerHTML=sum+bodyHtml;
-  const prio=(cnt.critical||0)+(cnt.high||0);
-  setStatus(`sécurité : ${list.length} point(s) d'attention${prio?` · ${prio} à traiter en priorité`:""}`);
+  host.innerHTML=head+bodyHtml;
+  const sq=el("sec-q");
+  if(sq){ sq.oninput=()=>{ secQuery=sq.value; const at=sq.selectionStart; renderSecurity(graph);
+      const s3=el("sec-q"); if(s3){ s3.focus(); try{ s3.setSelectionRange(at,at); }catch(_){} } }; }
+  const cl=el("sec-filter-clear");
+  if(cl) cl.onclick=()=>{ secFilter.clear(); secQuery=""; renderSecurity(graph); };
+  const shown=list.length, prio=list.filter(f=>f.severity==="critical"||f.severity==="high").length;
+  setStatus(shown===all.length
+    ? `sécurité : ${all.length} point(s) d'attention${prio?` · ${prio} à traiter en priorité`:""}`
+    : `sécurité : ${shown} affiché(s) sur ${all.length}`);
 }
+// Clic / clavier sur le rapport : la pastille filtre, la fiche emmène sur la carte.
+el("sec").addEventListener("click", ev=>{
+  const pill=ev.target.closest("[data-filter]");
+  if(pill){ const sv=pill.getAttribute("data-filter");
+    if(secFilter.has(sv)) secFilter.delete(sv); else secFilter.add(sv);
+    if(gGraph) renderSecurity(gGraph); return; }
+  const card=ev.target.closest("[data-goto]");
+  if(card) gotoFinding(card.getAttribute("data-goto"), card.getAttribute("data-cat"));
+});
+el("sec").addEventListener("keydown", ev=>{
+  if(ev.key!=="Enter" && ev.key!==" ") return;
+  const t=ev.target.closest("[data-goto],[data-filter]"); if(!t) return;
+  ev.preventDefault(); t.click();
+});
 
 // Recommandation + exemple YAML par type de finding (informatif : à adapter, pas un patch auto).
 function recoFor(f){
@@ -1472,40 +1781,201 @@ document.addEventListener("click", ev=>{
   if(nd && secMode){ openSecPanel(nd.getAttribute("data-node")); }
 });
 
-/* =================== Bascule =================== */
-async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
-  el("hint").innerHTML="Réseau &amp; interactions — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré (config) non observé</b> · <b style='color:#ef4444'>rouge=dérive réseau</b> = trafic observé <b>non autorisé par une NetworkPolicy</b> (rouge seulement si la cible est protégée).";
-  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderInteractions(g); } catch(e){ setStatus("API injoignable : "+e.message); } }
-async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow"); setLegend(KIND_LEGEND);
-  el("hint").innerHTML="Exécution — colonnes par <b>rôle</b> (plusieurs types empilés, colonnes vides masquées) : <b style='color:#d0a15e'>Dépendances</b> (PVC / Secret / ConfigMap) → <b>Workload</b> → Pod → Service → Ingress, groupé par namespace. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod. <span style='color:#5b6472'>molette = zoom · espace + glisser = déplacer.</span>";
+/* =================== Zones, lentilles, états =================== */
+// Trois zones (Carte / Sécurité / Explorer) ; à l'intérieur d'une zone, une lentille
+// change l'angle sans changer de sujet — et conserve le nœud sur lequel on travaille.
+const MODE_ZONE = { flow:"map", interactions:"map", access:"map", overview:"map",
+                    security:"sec", attack:"sec", explore:"explore" };
+const ZONE_MODES = { map:["interactions","flow","access","overview"], sec:["security","attack"], explore:["explore"] };
+const SHOW = {};
+let lastMapMode="interactions", lastSecMode="security", mapFocus=null;
+
+// --- Hôte de scène par mode, pour poser un état de chargement ou de panne au bon endroit
+const MODE_HOST = { flow:"flow-wrap", interactions:"int-wrap", access:"access-wrap",
+                    overview:"sankey-wrap", security:"sec-wrap", attack:"attack-wrap", explore:"explore-wrap" };
+function clearStageMsg(m){ const h=el(MODE_HOST[m]); if(!h) return; const x=h.querySelector(".stagemsg"); if(x) x.remove(); }
+function stageLoading(m,label){ const h=el(MODE_HOST[m]); if(!h) return; clearStageMsg(m);
+  const d=document.createElement("div"); d.className="stagemsg";
+  d.innerHTML=`<div class="skel">${[38,64,26,52,72,44,30].map(v=>`<i style="height:${v}px"></i>`).join("")}</div>`
+    +`<p>${esc(label||"Lecture du cluster…")}</p>`;
+  h.appendChild(d); }
+// Une panne dit ce qui s'est passé, la cause la plus probable, et la commande qui répare.
+function apiErrorInfo(e){
+  const msg=String((e&&e.message)||e||""), base=apiBase();
+  // Le port vient de l'adresse saisie : proposer une commande qui démarre le hub
+  // ailleurs que là où on le cherche n'aiderait personne.
+  let port="8080", host="";
+  try{ const u=new URL(base); port=u.port||(u.protocol==="https:"?"443":"80"); host=u.hostname; }catch(_){}
+  const startCmd=`cd <dossier du dépôt kubegraph>\n`
+    +`KUBECONFIG=~/.kube/config KUBEGRAPH_ADDR=:${port} go run ./cmd/kubegraph`;
+  if(/failed to fetch|networkerror|load failed|refused/i.test(msg))
+    return { title:"Le hub kubegraph ne répond pas",
+      detail:`Aucune réponse de ${base}. Soit le hub n'est pas démarré, soit il écoute sur un autre port `
+        +`(KUBEGRAPH_ADDR, ${port==="8080"?"8080 par défaut":"8080 par défaut — tu interroges "+port}). `
+        +`Pour vérifier : curl -s ${base}/healthz`,
+      cmd:startCmd };
+  if(/\b40[13]\b/.test(msg))
+    return { title:"Le hub refuse l'accès",
+      detail:"Le hub répond, mais rejette la lecture. Le ServiceAccount n'a probablement pas les droits attendus.",
+      cmd:"kubectl auth can-i --list --as=system:serviceaccount:kubegraph:kubegraph" };
+  if(/\b404\b/.test(msg))
+    return { title:"Route inconnue sur le hub",
+      detail:`${base} répond mais ne connaît pas cette route. Le hub et ce frontend ne sont sans doute pas de la même version.`,
+      cmd:"go build ./... && go run ./cmd/kubegraph" };
+  if(/\b5\d\d\b/.test(msg))
+    return { title:"Le hub a échoué à répondre",
+      detail:"Le hub est joignable mais a renvoyé une erreur serveur. Ses logs diront laquelle.",
+      cmd:null };
+  if(/\b404\b/.test(msg)===false && /unexpected token|JSON/i.test(msg))
+    return { title:"Ce n'est pas le hub kubegraph",
+      detail:`${base} répond, mais pas du JSON. Un autre service occupe probablement ce port.`,
+      cmd:`curl -s ${base}/healthz` };
+  if(/cors/i.test(msg))
+    return { title:"Requête bloquée par le navigateur (CORS)",
+      detail:`Le hub à ${base} n'autorise pas cette origine. Sers le frontend depuis le hub lui-même, ou ouvre le fichier en local.`,
+      cmd:null };
+  return { title:"Requête impossible", detail:msg||"Erreur inconnue.", cmd:null };
+}
+function stageError(m,e){ const h=el(MODE_HOST[m]); const i=apiErrorInfo(e);
+  setStatus(i.title);
+  if(!h) return; clearStageMsg(m);
+  const d=document.createElement("div"); d.className="stagemsg err";
+  d.innerHTML=`<div class="ico">!</div><h3>${esc(i.title)}</h3><p>${esc(i.detail)}</p>`
+    +(i.cmd?`<code>${esc(i.cmd)}</code>`:"")
+    +`<div class="acts"><button type="button" data-retry>Réessayer</button></div>`;
+  d.querySelector("[data-retry]").onclick=()=>{ gGraph=null; gNodes=null; gFindings=null; secIndex=null; (SHOW[m]||SHOW.interactions)(); };
+  h.appendChild(d); }
+
+// Indice : la phrase d'un côté, le code couleur de l'autre — une pastille se lit d'un coup.
+const key = (c,l) => `<span class="kchip"><i class="dot" style="background:${c}"></i>${l}</span>`;
+function setHint(text, keys){ el("hint").innerHTML=`<span class="htext">${text}</span>`+(keys||""); }
+
+async function showInteractions(){ enterMode("interactions");
+  setHint("Réseau &amp; interactions — chaque application à gauche, ses dépendances réellement appelées à droite. Le ruban prend la couleur du nœud source.",
+    key("#5b9bff","Ingress")+key("#6b7688","Service")+key("oklch(0.88 0.22 178.95)","Charge de travail")+key("#8b5cf6","Base / StatefulSet")
+    +key("#e0a94a","Déclaré mais non observé")+key("#ef4444","Dérive : trafic non autorisé par une NetworkPolicy"));
+  setLegend(KIND_LEGEND);
+  stageLoading("interactions","Lecture du graphe…");
+  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g);
+    clearStageMsg("interactions"); renderInteractions(g); afterMapRender(); } catch(e){ stageError("interactions",e); } }
+async function showFlow(){ enterMode("flow");
+  setHint("Exécution — colonnes par rôle : dépendances → charge de travail → pod → service → ingress, groupé par namespace. L'épaisseur donne le nombre de pods.",
+    key("#d0a15e","Dépendance (PVC / Secret / ConfigMap)")+key("#e0a94a","Au repos (0 pod)")+key("#ef4444","Cassé (ingress sans flux, service sans pod)"));
+  setLegend(KIND_LEGEND);
   buildKindFilter(["wl","pod","svc","ing","config","storage"]);
+  stageLoading("flow","Lecture du graphe…");
   try { const g=await ensureGraph(); fillNsPicker(g); fillClusterPicker(g.nodes); updateClusterCtl();
-    if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderFlow(g, el("ns-picker").value); }
-  catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
-async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
+    if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g);
+    clearStageMsg("flow"); renderFlow(g, el("ns-picker").value); afterMapRender(); }
+  catch(e){ stageError("flow",e); } }
+async function showOverviewTab(){ enterMode("overview");
   setLegend('<span class="chip" style="color:var(--muted)">Couleur = namespace · hauteur = nombre d\'objets</span>');
-  el("hint").textContent="Vue d'ensemble — Cluster → Namespaces → Types. La hauteur = le nombre d'objets.";
-  try { const nn=await ensureNodes(); if(gitMode) buildGitIndex(nn); renderOverview(nn); } catch(e){ setStatus("API injoignable : "+e.message); } }
-async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore"); setLegend(LAYER_LEGEND);
-  el("hint").innerHTML="Explorer — filtre puis <b>Charge</b> un départ. <b>Survole</b> un nœud : sa chaîne d'impact s'allume de bout en bout (amont + aval). <b>Clique</b> : détail, relations, points d'attention, et dépliage du cercle suivant.";
-  try { const nn=await ensureNodes(); fillClusterPicker(nn); updateClusterCtl(); fillPicker(nn); ensureFindings().catch(()=>{});
+  setHint("Inventaire — cluster → namespaces → types. La hauteur donne le nombre d'objets. C'est un dénombrement, pas une carte de relations.","");
+  stageLoading("overview","Dénombrement…");
+  try { const nn=await ensureNodes(); if(gitMode) buildGitIndex(nn);
+    clearStageMsg("overview"); renderOverview(nn); } catch(e){ stageError("overview",e); } }
+async function showExplore(){ enterMode("explore");
+  setHint("Explorer — <b>⌘K</b> (ou Ctrl-K) ouvre la recherche. Survole un nœud : sa chaîne d'impact s'allume de bout en bout. Clique : détail, relations, points d'attention, et dépliage du cercle suivant.","");
+  setLegend(LAYER_LEGEND);
+  try { const nn=await ensureNodes(); fillClusterPicker(nn); updateClusterCtl(); fillPicker(nn); await ensureFindings().catch(()=>{});
     const present=[]; const seen=new Set(); for(const n of nn){ const c=catOfKind(n.kind); if(!seen.has(c)){ seen.add(c); present.push(c); } }
     const ORDER=["wl","pod","svc","ing","config","storage","security","autoscaling","infra","autre"];
     buildKindFilter(ORDER.filter(c=>seen.has(c)));
-    cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
-async function showAccess(){ document.body.dataset.mode="access"; setTab("access"); setLegend(ACCESS_LEGEND);
-  el("hint").innerHTML="Accès &amp; identité — pour chaque app : ses <b style='color:#d98a5b'>secrets</b> référencés (nom seul, jamais la valeur) → le <b>workload</b> → le <b style='color:#7c9cf5'>ServiceAccount</b> sous lequel il tourne → les <b style='color:#c678c9'>Rôles</b> qui lui sont accordés (RBAC). Répond à « qui tourne comme quoi, et qu'est-ce que ça peut faire ».";
-  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderAccess(g); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
-async function showSecurity(){ document.body.dataset.mode="security"; setTab("security"); setLegend(SEC_LEGEND);
-  el("hint").innerHTML="Sécurité — <b>points d'attention</b> (informer, pas corriger) : durcissement pod, RBAC/escalation, exposition, dérive réseau. Gravité <b style='color:#e3c341'>faible</b> → <b style='color:#e0883a'>moyen</b> → <b style='color:#e8622f'>élevé</b> → <b style='color:#ef4444'>critique</b>. Active « mode sécu » (en haut) sur les autres onglets pour colorer ces risques directement sur la carte.";
-  try { const g=await ensureGraph(); await ensureSec(g); renderSecurity(g); }
-  catch(e){ setStatus("API injoignable : "+e.message); el("sec").innerHTML="<div id='sec-empty'>API injoignable : "+esc(e.message)+"</div>"; } }
-async function showAttack(){ document.body.dataset.mode="attack"; setTab("attack"); setLegend(ATK_LEGEND);
-  el("hint").innerHTML="Chemins d'attaque — <b>flux d'escalade</b> composés depuis les données existantes : <b style='color:#e8622f'>entrée exposée</b> → <b style='color:#5b9bff'>exécution</b> → <b style='color:#bc8cff'>identité (SA)</b> → <b style='color:#e0883a'>capacité (RBAC / évasion)</b> → <b style='color:#ef4444'>actif critique</b>. Choisis une entrée. <b>Chemins POSSIBLES à vérifier</b> (l'admission control PSA/OPA n'est pas connu) — posture défensive : où couper.";
-  try { const g=await ensureGraph(); await ensureFindings(); acy.resize(); renderAttack(); }
-  catch(e){ setStatus("API injoignable : "+e.message); el("atk-empty").style.display="block"; el("atk-empty").textContent="API injoignable : "+e.message; } }
-function setTab(m){ closeSecPanel(); for (const t of ["flow","interactions","access","security","attack","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); updateClusterCtl(); }
-el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-security").onclick=showSecurity; el("tab-attack").onclick=showAttack; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
+    clearStageMsg("explore"); cy.resize(); autoSeed(nn); } catch(e){ stageError("explore",e); } }
+async function showAccess(){ enterMode("access");
+  setHint("Accès &amp; identité — pour chaque application : ses secrets référencés (le nom seul, jamais la valeur) → la charge de travail → le ServiceAccount sous lequel elle tourne → les rôles qui lui sont accordés.",
+    key("#d98a5b","Secret")+key("oklch(0.88 0.22 178.95)","Charge de travail")+key("#7c9cf5","ServiceAccount")+key("#c678c9","Rôle / ClusterRole"));
+  setLegend(ACCESS_LEGEND);
+  stageLoading("access","Lecture du RBAC…");
+  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g);
+    clearStageMsg("access"); renderAccess(g); afterMapRender(); } catch(e){ stageError("access",e); } }
+async function showSecurity(){ enterMode("security");
+  setHint("Constats — informer, pas corriger : durcissement pod, RBAC et escalation, exposition, dérive réseau. <b>Clique une fiche</b> pour la retrouver sur la carte.",
+    key("#e3c341","faible")+key("#e0883a","moyen")+key("#e8622f","élevé")+key("#ef4444","critique"));
+  setLegend(SEC_LEGEND);
+  stageLoading("security","Évaluation des règles…");
+  try { const g=await ensureGraph(); await ensureSec(g); clearStageMsg("security"); renderSecurity(g); }
+  catch(e){ stageError("security",e); } }
+async function showAttack(){ enterMode("attack");
+  setHint("Chemins d'attaque — flux d'escalade composés depuis les données existantes. <b>Chemins POSSIBLES à vérifier</b> : l'admission control (PSA/OPA) n'est pas connu, la posture est donc défensive — où couper.",
+    key("#e8622f","entrée exposée")+key("#5b9bff","exécution")+key("#bc8cff","identité (SA)")+key("#e0883a","capacité (RBAC / évasion)")+key("#ef4444","actif critique"));
+  setLegend(ATK_LEGEND);
+  stageLoading("attack","Composition des chemins…");
+  try { const g=await ensureGraph(); await ensureFindings(); clearStageMsg("attack"); acy.resize(); renderAttack(); }
+  catch(e){ stageError("attack",e); } }
+
+Object.assign(SHOW,{flow:showFlow,interactions:showInteractions,access:showAccess,
+  security:showSecurity,attack:showAttack,overview:showOverviewTab,explore:showExplore});
+
+function enterMode(m){ closeSecPanel(); document.body.dataset.mode=m; clearStageMsg(m);
+  const z=MODE_ZONE[m];
+  if(z==="map") lastMapMode=m; if(z==="sec") lastSecMode=m;
+  for(const [id,zz] of [["zone-map","map"],["zone-sec","sec"],["zone-explore","explore"]]){
+    const b=el(id); b.setAttribute("aria-selected", String(zz===z)); b.tabIndex = zz===z?0:-1; }
+  el("lens-map").classList.toggle("on", z==="map");
+  el("lens-sec").classList.toggle("on", z==="sec");
+  for(const mm of Object.keys(MODE_ZONE)){ const b=el("lens-"+mm);
+    if(b){ b.classList.toggle("active", mm===m); b.setAttribute("aria-pressed", String(mm===m)); } }
+  updateClusterCtl(); }
+// Compat : d'anciens appels passent encore par setTab()
+function setTab(m){ /* l'état d'onglet est posé par enterMode */ }
+
+// Changer de lentille garde le nœud sur lequel on travaille : on le retrouve
+// éclairé dans la nouvelle vue, au lieu de repartir de zéro.
+function afterMapRender(){ if(!mapFocus) return;
+  requestAnimationFrame(()=>{
+    if(focusNodeInStage(mapFocus,false)) return;
+    // Le suivi est conservé, mais cette lentille ne dessine pas cet objet : le dire
+    // plutôt que de le perdre en silence.
+    const n=gGraph&&gGraph.nodes.find(x=>x.id===mapFocus);
+    if(n) setStatus(`${n.kind}/${n.name} n'apparaît pas dans cette lentille — suivi conservé`);
+  }); }
+function focusNodeInStage(nodeId, ping=true){
+  const host=el(document.body.dataset.mode==="flow"?"flow":document.body.dataset.mode==="access"?"access":"cyint");
+  if(!host) return false;
+  const g=host.querySelector(`[data-node="${CSS.escape(nodeId)}"]`);
+  if(!g) return false;
+  const svg=host.querySelector("svg"), st=PZ[host.id];
+  if(svg&&st){ const bb=g.getBBox(), wrap=host.parentElement;
+    const cw=wrap.clientWidth||1, ch=wrap.clientHeight||1;
+    st.scale=Math.min(Math.max(st.scale,0.55),1.6);
+    st.tx=cw/2-(bb.x+bb.width/2)*st.scale; st.ty=ch/2-(bb.y+bb.height/2)*st.scale;
+    host.style.transform=`translate(${st.tx.toFixed(1)}px,${st.ty.toFixed(1)}px) scale(${st.scale.toFixed(4)})`;
+    if(ping){ const bb2=g.getBBox(); const c=document.createElementNS("http://www.w3.org/2000/svg","circle");
+      c.setAttribute("cx",bb2.x+bb2.width/2); c.setAttribute("cy",bb2.y+bb2.height/2);
+      c.setAttribute("r","8"); c.setAttribute("class","pingdot"); svg.appendChild(c);
+      setTimeout(()=>c.remove(),3200); } }
+  return true; }
+
+// Un constat mène à l'objet : c'est le lien qui manquait entre le rapport et la carte.
+const CAT_LENS = { network:"interactions", exposure:"interactions", rbac:"access", pod:"flow" };
+async function gotoFinding(nodeId, cat){
+  mapFocus=nodeId;
+  if(!secMode){ secMode=true; el("sec-mode").checked=true; document.body.classList.add("secmode");
+    if(gGraph){ try{ await ensureSec(gGraph); }catch(_){} } }
+  const target=CAT_LENS[cat]||"interactions";
+  await (SHOW[target]||showInteractions)();
+  requestAnimationFrame(()=>{
+    const ok=focusNodeInStage(nodeId,true);
+    openSecPanel(nodeId);
+    const nm=(gGraph&&gGraph.nodes.find(n=>n.id===nodeId));
+    setStatus(ok ? `${nm?nm.kind+"/"+nm.name:"objet"} — retrouvé sur la carte`
+                 : `${nm?nm.kind+"/"+nm.name:"objet"} — absent de cette lentille, détail ouvert à droite`);
+  }); }
+
+// Navigation clavier des zones (rôle tab : flèches + Origine/Fin)
+const ZONE_IDS=["zone-map","zone-sec","zone-explore"];
+el("zone-map").onclick=()=>(SHOW[lastMapMode]||showInteractions)();
+el("zone-sec").onclick=()=>(SHOW[lastSecMode]||showSecurity)();
+el("zone-explore").onclick=showExplore;
+for(const id of ZONE_IDS) el(id).addEventListener("keydown", ev=>{
+  const i=ZONE_IDS.indexOf(id); let j=null;
+  if(ev.key==="ArrowRight") j=(i+1)%ZONE_IDS.length;
+  else if(ev.key==="ArrowLeft") j=(i-1+ZONE_IDS.length)%ZONE_IDS.length;
+  else if(ev.key==="Home") j=0; else if(ev.key==="End") j=ZONE_IDS.length-1;
+  if(j===null) return; ev.preventDefault(); el(ZONE_IDS[j]).focus(); el(ZONE_IDS[j]).click(); });
+for(const m of Object.keys(MODE_ZONE)){ const b=el("lens-"+m); if(b) b.onclick=()=>SHOW[m](); }
+
 el("ns-picker").onchange=()=>{ if(gGraph){ if(secMode) ensureSec(gGraph).then(()=>renderFlow(gGraph, el("ns-picker").value)); else renderFlow(gGraph, el("ns-picker").value); } };
 el("cluster-picker").onchange=()=>{ activeCluster=el("cluster-picker").value; const m=document.body.dataset.mode;
   if(m==="flow"&&gGraph) renderFlow(gGraph, el("ns-picker").value);
@@ -1536,15 +2006,15 @@ el("refresh").onclick=async()=>{ gGraph=null; gNodes=null; gFindings=null; secIn
 // Légende contextuelle : Flux/Carte affichent le vrai code couleur par KIND (+ statut) ;
 // Vue d'ensemble / Explorer gardent le code par couche.
 const chip = (c,l) => `<span class="chip"><span class="dot" style="background:${c}"></span>${l}</span>`;
-const LAYER_LEGEND = Object.values(LAYER).map(l=>chip(l.color,l.label)).join("") + chip("#ef4444","0 pod / cassé");
+const LAYER_LEGEND = Object.values(LAYER).map(l=>chip(l.color,l.label)).join("") + chip("#ef4444","Cassé / 0 pod");
 const KIND_LEGEND =
-  chip("oklch(0.88 0.22 178.95)","Deployment / workload") + chip("#8b5cf6","StatefulSet / base") +
+  chip("oklch(0.88 0.22 178.95)","Charge de travail") + chip("#8b5cf6","Base / StatefulSet") +
   chip("#5fb3c9","Pod") + chip("#6b7688","Service") + chip("#5b9bff","Ingress") +
-  `<span class="chip" style="margin-left:10px"><span class="dot" style="background:#e0a94a"></span>0 pod / idle</span>` +
-  chip("#ef4444","cassé / dérive");
+  `<span class="chip" style="margin-left:10px"><span class="dot" style="background:#e0a94a"></span>Au repos (0 pod)</span>` +
+  chip("#ef4444","Cassé / dérive");
 const ACCESS_LEGEND =
-  chip("#d98a5b","Secret (nom seul)") + chip("oklch(0.88 0.22 178.95)","Workload") +
-  chip("#7c9cf5","ServiceAccount") + chip("#c678c9","Role / ClusterRole");
+  chip("#d98a5b","Secret (nom seul)") + chip("oklch(0.88 0.22 178.95)","Charge de travail") +
+  chip("#7c9cf5","ServiceAccount") + chip("#c678c9","Rôle / ClusterRole");
 const SEC_LEGEND =
   chip("#e3c341","faible") + chip("#e0883a","moyen") + chip("#e8622f","élevé") + chip("#ef4444","critique") +
   `<span class="chip" style="margin-left:10px;color:var(--muted)">gravité croissante · en mode sécu, gris = pas de point d'attention</span>`;
@@ -1557,6 +2027,106 @@ const GIT_LEGEND =
   `<span class="chip" style="margin-left:10px;color:var(--muted)">déclaré vs observé · gris = non jugé</span>`;
 const setLegend = html => { el("legend").innerHTML = html; };
 setLegend(KIND_LEGEND);
+
+/* =================== Palette de recherche (⌘K) =================== */
+// Un select natif de plusieurs centaines d'options n'est pas navigable : ici,
+// saisie floue, regroupement par type, et sélection au clavier.
+let _palList=[], _palIdx=0;
+async function palOpen(){
+  el("pal").classList.add("open");
+  const q=el("pal-q"); q.value=""; q.focus();
+  if(!_pickNodes || !_pickNodes.length){
+    el("pal-list").innerHTML='<div class="none">Lecture du cluster…</div>';
+    try{ fillPicker(await ensureNodes()); await ensureFindings().catch(()=>{}); }
+    catch(e){ const i=apiErrorInfo(e);
+      el("pal-list").innerHTML=`<div class="none"><b style="color:#e6edf3">${esc(i.title)}</b><br>${esc(i.detail)}</div>`; return; }
+  }
+  palRender(q.value);
+}
+const palClose = () => el("pal").classList.remove("open");
+function palScore(n,q){
+  const hay=`${n.kind}/${n.name} ${n.namespace||""}`.toLowerCase();
+  const i=hay.indexOf(q); if(i<0) return -1;
+  let sc=100-i;                                  // plus le motif est tôt, mieux c'est
+  if(n.name.toLowerCase().startsWith(q)) sc+=60; // préfixe du nom : très pertinent
+  if(n.kind==="Deployment"||n.kind==="StatefulSet") sc+=22;
+  if(n.kind==="Service"||n.kind==="Ingress") sc+=14;
+  if(n.kind==="Pod"||n.kind==="ReplicaSet") sc-=12;
+  return sc;
+}
+function palRender(q){
+  const ql=q.trim().toLowerCase(), host=el("pal-list");
+  let list=(_pickNodes||[]).filter(clusterOk);
+  list = ql ? list.map(n=>({n,sc:palScore(n,ql)})).filter(x=>x.sc>=0).sort((a,b)=>b.sc-a.sc).map(x=>x.n)
+            : list.slice().sort((a,b)=>(a.kind+a.name).localeCompare(b.kind+b.name));
+  _palList=list.slice(0,60); _palIdx=0;
+  if(!_palList.length){ host.innerHTML='<div class="none">Aucun objet ne correspond.</div>'; return; }
+  let html="", lastKind=null;
+  _palList.forEach((n,i)=>{
+    if(n.kind!==lastKind){ html+=`<div class="grp">${esc(n.kind)}</div>`; lastKind=n.kind; }
+    html+=`<div class="it" role="option" data-i="${i}" aria-selected="${i===0}">`
+      +`<span class="dot" style="background:${layerColor(n.layer)}"></span>`
+      +`<span class="nm">${esc(n.name)}</span>`
+      +`<span class="ns">${esc(n.namespace||"cluster")}</span></div>`;
+  });
+  host.innerHTML=html;
+  host.querySelectorAll(".it").forEach(d=>{
+    d.onmouseenter=()=>palSel(+d.getAttribute("data-i"));
+    d.onclick=()=>palPick(+d.getAttribute("data-i")); });
+}
+function palSel(i){ if(!_palList.length) return;
+  _palIdx=(i+_palList.length)%_palList.length;
+  const host=el("pal-list");
+  host.querySelectorAll(".it").forEach(d=>d.setAttribute("aria-selected", String(+d.getAttribute("data-i")===_palIdx)));
+  const cur=host.querySelector(`.it[data-i="${_palIdx}"]`); if(cur) cur.scrollIntoView({block:"nearest"}); }
+async function palPick(i){
+  const n=_palList[i!=null?i:_palIdx]; if(!n) return;
+  palClose(); el("picker").value=JSON.stringify({cluster:n.cluster,id:n.id});
+  const b=el("pal-open"); b.classList.add("set"); b.innerHTML=`${esc(n.kind)}/${esc(n.name)} <kbd>⌘K</kbd>`;
+  if(document.body.dataset.mode!=="explore") await showExplore();
+  loadSeed(n);
+}
+async function loadSeed(n){
+  try{ setStatus(`chargement de ${n.kind}/${n.name}…`);
+    cy.elements().remove(); maxDegree=0; closePanel();
+    merge(await fetchEgo(n.cluster, n.id.slice(n.cluster.length+1), parseInt(el("depth").value,10)));
+    cy.fit(cy.elements(),40);
+    const seed=cy.getElementById(n.id); if(seed.nonempty()){ seed.addClass("seed"); openPanel(seed); }
+    setStatus(`${cy.nodes().length} nœuds affichés autour de ${n.kind}/${n.name}`);
+  }catch(e){ stageError("explore",e); }
+}
+el("pal-open").onclick=palOpen;
+el("pal").addEventListener("click", ev=>{ if(ev.target===el("pal")) palClose(); });
+el("pal-q").addEventListener("input", ()=>palRender(el("pal-q").value));
+el("pal-q").addEventListener("keydown", ev=>{
+  if(ev.key==="ArrowDown"){ ev.preventDefault(); palSel(_palIdx+1); }
+  else if(ev.key==="ArrowUp"){ ev.preventDefault(); palSel(_palIdx-1); }
+  else if(ev.key==="Enter"){ ev.preventDefault(); palPick(); }
+  else if(ev.key==="Escape"){ ev.preventDefault(); palClose(); }
+});
+window.addEventListener("keydown", ev=>{
+  if((ev.metaKey||ev.ctrlKey) && ev.key.toLowerCase()==="k"){ ev.preventDefault();
+    if(el("pal").classList.contains("open")) palClose(); else palOpen(); }
+  else if(ev.key==="Escape" && el("pal").classList.contains("open")) palClose();
+});
+
+// Départ par défaut : l'objet qui porte le constat le plus grave, sinon la charge
+// de travail la plus centrale. Jamais le premier ConfigMap par ordre alphabétique.
+let _seeded=false;
+function autoSeed(nodes){
+  if(_seeded || cy.nodes().length) return; _seeded=true;
+  const byId={}; for(const n of nodes) byId[n.id]=n;
+  let pick=null;
+  const fnd=(gFindings||[]).filter(f=>byId[f.node]).sort((a,b)=>SEV[b.severity]-SEV[a.severity])[0];
+  if(fnd) pick=byId[fnd.node];
+  if(!pick){ const wl=nodes.filter(n=>clusterOk(n)&&(n.kind==="Deployment"||n.kind==="StatefulSet"));
+    pick = wl.sort((a,b)=>(a.namespace||"").localeCompare(b.namespace||"")||a.name.localeCompare(b.name))[0]; }
+  if(!pick) return;
+  const b=el("pal-open"); b.classList.add("set"); b.innerHTML=`${esc(pick.kind)}/${esc(pick.name)} <kbd>⌘K</kbd>`;
+  el("picker").value=JSON.stringify({cluster:pick.cluster,id:pick.id});
+  loadSeed(pick);
+  if(fnd) setStatus(`départ : ${pick.kind}/${pick.name} — objet du constat le plus grave`);
+}
 
 showInteractions();
 </script>
