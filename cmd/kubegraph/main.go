@@ -13,10 +13,12 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"kubegraph/internal/api"
 	"kubegraph/internal/conntrack"
+	"kubegraph/internal/source/declared"
 	"kubegraph/internal/source/live"
 	"kubegraph/internal/store"
 )
@@ -34,6 +36,26 @@ func main() {
 	nodes, edges, err := src.Collect(context.Background())
 	if err != nil {
 		log.Fatalf("collecte : %v", err)
+	}
+
+	// Source DÉCLARÉE (GitOps) optionnelle : dossier de YAML rendus. Calcule la
+	// dérive « déclaré vs observé » (présence). Non bloquant.
+	if gitDir := flagVal("--git-dir", "KUBEGRAPH_GITDIR"); gitDir != "" {
+		if decl, derr := declared.Load(gitDir); derr != nil {
+			log.Printf("source déclarée (%s) : %v (ignorée)", gitDir, derr)
+		} else {
+			nodes = declared.ApplyDrift(src.ClusterID(), nodes, decl)
+			var missing, unmanaged int
+			for _, n := range nodes {
+				switch n.Drift {
+				case "missing":
+					missing++
+				case "unmanaged":
+					unmanaged++
+				}
+			}
+			fmt.Printf("gitops : %d déclaré(s) lus · %d manquant(s) · %d hors-Git\n", len(decl), missing, unmanaged)
+		}
 	}
 
 	counts := make(map[string]int)
@@ -142,4 +164,19 @@ func hasFlag(f string) bool {
 		}
 	}
 	return false
+}
+
+// flagVal lit la valeur d'un flag (--nom valeur ou --nom=valeur), sinon la
+// variable d'environnement de repli.
+func flagVal(name, env string) string {
+	args := os.Args[1:]
+	for i, a := range args {
+		if a == name && i+1 < len(args) {
+			return args[i+1]
+		}
+		if strings.HasPrefix(a, name+"=") {
+			return strings.TrimPrefix(a, name+"=")
+		}
+	}
+	return os.Getenv(env)
 }

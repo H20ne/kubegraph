@@ -125,10 +125,11 @@
   .pzhint { position:absolute; right:12px; bottom:10px; z-index:6; font-size:11px; color:#5b6472;
     background:rgba(8,9,12,.7); border:1px solid rgba(255,255,255,.06); border-radius:7px; padding:4px 9px; pointer-events:none; }
   body.panning #flow-wrap, body.panning #int-wrap, body.panning #access-wrap, body.panning #sankey-wrap { cursor:grab; }
-  /* Survol d'un flux : léger surbrillant + fin liseré pour le suivre d'un bout à l'autre. */
-  #flow path, #cyint path, #access path, #sankey path { transition:filter .1s; }
-  #flow path:hover, #cyint path:hover, #access path:hover, #sankey path:hover {
-    filter:brightness(1.6) saturate(1.12); stroke:#e7eef8; stroke-width:.5; stroke-opacity:.35; cursor:default; }
+  /* Survol d'un flux : on éclaire toute la chaîne connectée (de bout en bout) et
+     on estompe le reste, pour suivre un flux d'un bout à l'autre. */
+  path.rib { transition:opacity .1s, filter .1s; }
+  .fluxdim path.rib:not(.flowhl) { opacity:.1; }
+  path.rib.flowhl { filter:brightness(1.5) saturate(1.12); }
   #cyint { width:100%; }
   #int-empty { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--muted); font-size:13px; padding:0 40px; display:none; }
   #explore-wrap { flex:1; min-height:0; display:none; }
@@ -174,6 +175,7 @@
     </span>
     <span id="sec-controls">
       <label class="switch"><input type="checkbox" id="sec-mode"> mode sécu</label>
+      <label class="switch"><input type="checkbox" id="git-mode"> mode GitOps</label>
     </span>
     <span id="explorer-controls">
       <label>départ <select id="picker"><option value="">—</option></select></label>
@@ -304,7 +306,7 @@ function renderFlow(graph, ns) {
 
   // Nœuds par colonne (rôle).
   const col = COLDEFS.map(()=>[]);
-  for (const n of graph.nodes) { if (!inNs(n)) continue; const c = kindCol(n.kind); if (c >= 0) col[c].push(n); }
+  for (const n of graph.nodes) { if (!inNs(n)) continue; if (n.origin==="declared" && !gitMode) continue; const c = kindCol(n.kind); if (c >= 0) col[c].push(n); }
 
   // #pods par nœud (épaisseur + états).
   const pv = {};
@@ -396,8 +398,8 @@ function renderFlow(graph, ns) {
     // On glisse le raccord SOUS le nœud (au-delà du rayon des coins arrondis) :
     // le nœud opaque recouvre l'extrémité, plus de coin noir à la jonction.
     const d=band(P.x+nodeW-3.5, l.sy, l.sth, Q.x+3.5, l.ty, l.tth);
-    rib+=`<path d="${d}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
-    rib+=`<path d="${d}" fill="url(#flxstart)" pointer-events="none"/>`;
+    rib+=`<path class="rib" data-from="${l.s}" data-to="${l.t}" d="${d}" fill="url(#${id})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
+    rib+=`<path class="rib" data-from="${l.s}" data-to="${l.t}" d="${d}" fill="url(#flxstart)" pointer-events="none"/>`;
   }
   const litNode=(p,cap,ttl,rx)=>{ const gid="fsrc"+(gi++);
     defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
@@ -409,8 +411,8 @@ function renderFlow(graph, ns) {
     const cap = secNodeCol(n.id, bad ? "#ef4444" : idle ? "#e0a94a" : KCOL(n.kind));
     const extra = n.kind==="Service" && n.noSelector ? " · sans sélecteur" : "";
     const ttl = `<title>${esc(n.kind)}/${esc(n.name)}${isWL?` — ${v} pod${v>1?"s":""}`:""}${extra}</title>`;
-    if (isWL && !bad && !idle && !secMode) {
-      nodes+=litNode(p, cap, ttl, 4); // workload : tube éclairé (couleur du kind), sauf en mode sécu
+    if (isWL && !bad && !idle && !secMode && !gitMode) {
+      nodes+=litNode(p, cap, ttl, 4); // workload : tube éclairé (couleur du kind), sauf en mode sécu / GitOps
     } else {
       const glow = bad ? ' filter="url(#fsoft)"' : '';
       if ((n.kind==="Pod"||n.kind==="Service") && !bad) nodes+=`<rect x="${(p.x+2.5).toFixed(1)}" y="${(p.y+1).toFixed(1)}" width="${nodeW}" height="${p.h}" rx="2.5" fill="#04060a" opacity=".24" filter="url(#fsh)"/>`;
@@ -455,8 +457,9 @@ function renderOverview(nodes) {
   if (!nodes.length) { host.innerHTML = ""; return; }
   const cluster = (nodes[0]&&nodes[0].cluster)||"cluster";
   const nsCount = {}, nsKind = {};
-  for (const n of nodes) { const ns=n.namespace||"cluster-scoped"; nsCount[ns]=(nsCount[ns]||0)+1; (nsKind[ns]=nsKind[ns]||{})[n.kind]=(nsKind[ns][n.kind]||0)+1; }
-  const total = nodes.length;
+  const shown = nodes.filter(n=> !(n.origin==="declared" && !gitMode)); // fantômes GitOps masqués hors mode
+  for (const n of shown) { const ns=n.namespace||"cluster-scoped"; nsCount[ns]=(nsCount[ns]||0)+1; (nsKind[ns]=nsKind[ns]||{})[n.kind]=(nsKind[ns][n.kind]||0)+1; }
+  const total = shown.length;
   const nsList = Object.keys(nsCount).sort((a,b)=>nsCount[b]-nsCount[a]);
   // Palette premium (teintes profondes, pas de fluo).
   const palette = ["#5b9bff","#22c55e","#8b5cf6","#e0a94a","#5fb3c9","#ef6b6b","#d478c4","#38bdf8","#34d399","#a78bfa","#f0883e","#2dd4bf","#818cf8","#f472b6"];
@@ -474,21 +477,26 @@ function renderOverview(nodes) {
     return `M${x0},${ys} C${c},${ys} ${c},${yt} ${x1},${yt} L${x1},${yt+tht} C${c},${yt+tht} ${c},${ys+ths} ${x0},${ys+ths} Z`; };
   let defs=`<filter id="osoft" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.3"/></filter>`, rib="", nds="", labels="", gi=0;
   const grad=c0=>{ const id="og"+(gi++); defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${c0}" stop-opacity=".62"/><stop offset=".42" stop-color="${DIP}" stop-opacity=".26"/><stop offset="1" stop-color="${END}" stop-opacity=".46"/></linearGradient>`; return id; };
-  // Cluster → Namespace : remplit le cluster (part du count) à gauche, remplit le ns (sa hauteur) à droite.
-  let coff=clY;
-  for (const ns of nsList){ const p=nsPos[ns], cth=clH*nsCount[ns]/total, id=grad(nsColor[ns]);
-    rib+=`<path d="${band(xC+nodeW-1, coff, cth, xN+2, p.y, p.h)}" fill="url(#${id})"><title>${esc(ns)} · ${nsCount[ns]}</title></path>`; coff+=cth; }
+  // Dégradé INVERSÉ (gris côté cluster → couleur côté namespace) : le cluster reste neutre.
+  const gradRev=c0=>{ const id="og"+(gi++); defs+=`<linearGradient id="${id}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${END}" stop-opacity=".42"/><stop offset=".55" stop-color="${DIP}" stop-opacity=".26"/><stop offset="1" stop-color="${c0}" stop-opacity=".6"/></linearGradient>`; return id; };
+  // Cluster = bande GRISE de taille moyenne, CENTRÉE : les rubans en éventaillent
+  // vers tous les namespaces (plus lisible qu'une barre pleine hauteur bleue).
+  const clBandH = Math.min(clH, Math.max(160, clH*0.5)), clBandY = clY + (clH-clBandH)/2;
+  // Cluster → Namespace : part de la bande centrale, remplit le ns (sa hauteur) à droite.
+  let coff=clBandY;
+  for (const ns of nsList){ const p=nsPos[ns], cth=clBandH*nsCount[ns]/total, id=gradRev(nsColor[ns]);
+    rib+=`<path class="rib" data-from="cl" data-to="ns:${ns}" d="${band(xC+nodeW-1, coff, cth, xN+2, p.y, p.h)}" fill="url(#${id})"><title>${esc(ns)} · ${nsCount[ns]}</title></path>`; coff+=cth; }
   // Namespace → Type : remplit le ns (part de chaque kind) et le kind (sa hauteur).
   for (const ns of nsList){ const p=nsPos[ns]; let noff=p.y;
     for (const k of Object.keys(kindPos[ns])){ const kp=kindPos[ns][k], nth=p.h*nsKind[ns][k]/nsCount[ns], id=grad(nsColor[ns]);
-      rib+=`<path d="${band(xN+nodeW-1, noff, nth, xK+2, kp.y, kp.h)}" fill="url(#${id})"><title>${esc(k)} · ${nsKind[ns][k]}</title></path>`; noff+=nth; } }
-  // Cluster = barre slate + liseré lumineux.
+      rib+=`<path class="rib" data-from="ns:${ns}" data-to="k:${ns}/${k}" d="${band(xN+nodeW-1, noff, nth, xK+2, kp.y, kp.h)}" fill="url(#${id})"><title>${esc(k)} · ${nsKind[ns][k]}</title></path>`; noff+=nth; } }
+  // Bande cluster : slate + liseré GRIS (couleur neutre).
   defs+=`<linearGradient id="oclu" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a3346"/><stop offset="1" stop-color="#141a26"/></linearGradient>`;
-  nds+=`<rect x="${xC}" y="${clY}" width="${nodeW}" height="${clH}" rx="4" fill="url(#oclu)" stroke="rgba(255,255,255,.1)"/>`;
-  nds+=`<rect x="${xC+nodeW-2.5}" y="${clY}" width="2.5" height="${clH}" rx="1.5" fill="#6ea8fe" filter="url(#osoft)"/>`;
-  nds+=`<rect x="${xC+nodeW-1.5}" y="${clY+1}" width="1.5" height="${clH-2}" fill="#eef3fb"/>`;
-  labels+=`<text x="${xC-9}" y="${clY+13}" text-anchor="end" font-weight="700" font-size="12" fill="#e9edf3">${esc(cluster)}</text>`;
-  labels+=`<text x="${xC-9}" y="${clY+28}" text-anchor="end" font-size="10" font-family="'IBM Plex Mono',monospace" fill="#565f70">${total} objets</text>`;
+  nds+=`<rect x="${xC}" y="${clBandY.toFixed(1)}" width="${nodeW}" height="${clBandH.toFixed(1)}" rx="4" fill="url(#oclu)" stroke="rgba(255,255,255,.12)"/>`;
+  nds+=`<rect x="${xC+nodeW-2.5}" y="${clBandY.toFixed(1)}" width="2.5" height="${clBandH.toFixed(1)}" rx="1.5" fill="#8b95a5" filter="url(#osoft)"/>`;
+  nds+=`<rect x="${xC+nodeW-1.5}" y="${(clBandY+1).toFixed(1)}" width="1.5" height="${(clBandH-2).toFixed(1)}" fill="#dfe6f0"/>`;
+  labels+=`<text x="${xC-9}" y="${(clBandY+13).toFixed(1)}" text-anchor="end" font-weight="700" font-size="12" fill="#e9edf3">${esc(cluster)}</text>`;
+  labels+=`<text x="${xC-9}" y="${(clBandY+28).toFixed(1)}" text-anchor="end" font-size="10" font-family="'IBM Plex Mono',monospace" fill="#565f70">${total} objets</text>`;
   for (const ns of nsList){ const p=nsPos[ns];
     nds+=`<rect x="${xN}" y="${p.y}" width="${nodeW}" height="${p.h}" rx="2.5" fill="${nsColor[ns]}"/>`;
     labels+=`<text x="${xN-8}" y="${p.y+p.h/2}" text-anchor="end" dominant-baseline="middle" font-size="11.5" font-weight="600" fill="#e9edf3" stroke="#08090c" stroke-width="3" paint-order="stroke">${esc(ns)} · ${nsCount[ns]}</text>`; }
@@ -561,6 +569,22 @@ function makePanZoom(host){
 }
 ["flow","cyint","access","sankey"].forEach(idh => { const h=el(idh); if(h) makePanZoom(h); });
 function fitHost(host){ const p = PZ[host.id]; if(p) requestAnimationFrame(()=>p.fit()); }
+
+// Survol d'un flux : éclaire toute la CHAÎNE connectée (amont + aval), estompe le reste.
+function _adj(host){ const outA={}, inA={};
+  host.querySelectorAll("path.rib").forEach(p=>{ const f=p.getAttribute("data-from"), t=p.getAttribute("data-to"); if(!f||!t) return; (outA[f]=outA[f]||[]).push(t); (inA[t]=inA[t]||[]).push(f); });
+  return {outA,inA}; }
+function _walk(start, adj, set){ const st=[start]; while(st.length){ const x=st.pop(); if(set.has(x))continue; set.add(x); (adj[x]||[]).forEach(y=>st.push(y)); } }
+function hlFlow(host, a, b){ const {outA,inA}=_adj(host); const lit=new Set(); _walk(a,inA,lit); _walk(b,outA,lit);
+  host.classList.add("fluxdim");
+  host.querySelectorAll("path.rib").forEach(p=>{ if(lit.has(p.getAttribute("data-from"))&&lit.has(p.getAttribute("data-to"))) p.classList.add("flowhl"); }); }
+function clrFlow(host){ host.classList.remove("fluxdim"); host.querySelectorAll("path.rib.flowhl").forEach(p=>p.classList.remove("flowhl")); }
+["flow","cyint","access","sankey"].forEach(idh=>{ const h=el(idh); if(!h) return;
+  h.addEventListener("mouseover", ev=>{ if(!ev.target.closest) return;
+    const r=ev.target.closest("path.rib"); if(r){ hlFlow(h, r.getAttribute("data-from"), r.getAttribute("data-to")); return; }
+    const nd=ev.target.closest("[data-node]"); if(nd){ const id=nd.getAttribute("data-node"); hlFlow(h, id, id); } });
+  h.addEventListener("mouseout", ev=>{ if(ev.target.closest && (ev.target.closest("path.rib")||ev.target.closest("[data-node]"))) clrFlow(h); });
+});
 // Largeur cible du schéma = largeur du viewport (le pan/zoom gère le reste).
 function viewW(host){ const w = host.parentElement ? host.parentElement.clientWidth : 0; return Math.max(w || host.clientWidth || 1200, 900); }
 
@@ -749,7 +773,7 @@ function renderInteractions(graph){
       `<stop offset=".42" stop-color="${DIP}" stop-opacity="${op[1]}"/>`+
       `<stop offset="1" stop-color="${END}" stop-opacity="${op[2]}"/></linearGradient>`;
     const glow=''; // plus de flou sur les rubans : ils restent nets
-    rib+=`<path d="${band(P.x+nodeW-1, e.sy, Q.x+2, e.ty, TH)}" fill="url(#${id})"${glow}><title>${esc(byId[e.from].name)} → ${esc(byId[e.to].name)}</title></path>`;
+    rib+=`<path class="rib" data-from="${e.from}" data-to="${e.to}" d="${band(P.x+nodeW-1, e.sy, Q.x+2, e.ty, TH)}" fill="url(#${id})"${glow}><title>${esc(byId[e.from].name)} → ${esc(byId[e.to].name)}</title></path>`;
   }
   for(const id of ids){ const P=pos[id], n=byId[id], c=secNodeCol(id,KCOL(n.kind));
     if(isSource(id) && !secMode){
@@ -850,8 +874,8 @@ function renderAccess(graph){
     const c0=secEdgeCol(l.s,l.t,ACOL(byId[l.s].kind)), gid="ag"+(gi++);
     defs+=`<linearGradient id="${gid}" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="${c0}" stop-opacity=".78"/><stop offset=".42" stop-color="${DIP}" stop-opacity=".5"/><stop offset="1" stop-color="${END}" stop-opacity=".56"/></linearGradient>`;
     const d=band(P.x+nodeW-3.5,l.sy,l.sth,Q.x+3.5,l.ty,l.tth);
-    rib+=`<path d="${d}" fill="url(#${gid})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
-    rib+=`<path d="${d}" fill="url(#aflxstart)" pointer-events="none"/>`;
+    rib+=`<path class="rib" data-from="${l.s}" data-to="${l.t}" d="${d}" fill="url(#${gid})"><title>${esc(byId[l.s].name)} → ${esc(byId[l.t].name)}</title></path>`;
+    rib+=`<path class="rib" data-from="${l.s}" data-to="${l.t}" d="${d}" fill="url(#aflxstart)" pointer-events="none"/>`;
   }
   for(let c=0;c<4;c++) for(const n of col[c]){ const p=pos[n.id], cap=secNodeCol(n.id,ACOL(n.kind));
     const kindTag = n.kind==="ClusterRole" ? " [cluster]" : "";
@@ -923,8 +947,20 @@ function buildSecIndex(list){
 }
 async function ensureSec(graph){ const base=await ensureFindings(); secIndex=buildSecIndex(base.concat(computeNetworkFindings(graph))); return secIndex; }
 // En mode sécu : nœud non concerné = gris, concerné = couleur de gravité.
-function secNodeCol(id, fallback){ if(!secMode||!secIndex) return fallback; const s=secIndex.byNode.get(id); return s?SEV_COLOR[s]:SEC_GREY; }
-function secEdgeCol(a,b, fallback){ if(!secMode||!secIndex) return fallback; const s=secIndex.byEdge.get(a+"__"+b)||secIndex.byEdge.get(b+"__"+a); return s?SEV_COLOR[s]:"#242a34"; }
+// GitOps : dérive déclaré vs observé (drift porté par les nœuds).
+const GIT_COLOR = { insync:"#3fb950", missing:"#e0883a", unmanaged:"#ef4444" };
+const GIT_LABEL = { insync:"en phase", missing:"déclaré non déployé", unmanaged:"hors Git" };
+let gitMode=false, gitByNode=new Map();
+function buildGitIndex(g){ gitByNode=new Map(); const arr=(g&&g.nodes)||g||[]; for(const n of arr){ if(n.drift) gitByNode.set(n.id, n.drift); } return gitByNode; }
+function gitCounts(){ const c={insync:0,missing:0,unmanaged:0}; gitByNode.forEach(v=>{ if(c[v]!=null)c[v]++; }); return c; }
+function secNodeCol(id, fallback){
+  if(secMode&&secIndex){ const s=secIndex.byNode.get(id); return s?SEV_COLOR[s]:SEC_GREY; }
+  if(gitMode){ const d=gitByNode.get(id); return d&&GIT_COLOR[d]?GIT_COLOR[d]:SEC_GREY; }
+  return fallback; }
+function secEdgeCol(a,b, fallback){
+  if(secMode&&secIndex){ const s=secIndex.byEdge.get(a+"__"+b)||secIndex.byEdge.get(b+"__"+a); return s?SEV_COLOR[s]:"#242a34"; }
+  if(gitMode) return "#242a34";
+  return fallback; }
 
 function renderSecurity(graph){
   const host=el("sec");
@@ -1021,21 +1057,21 @@ document.addEventListener("click", ev=>{
 /* =================== Bascule =================== */
 async function showInteractions(){ document.body.dataset.mode="interactions"; setTab("interactions"); setLegend(KIND_LEGEND);
   el("hint").innerHTML="Réseau &amp; interactions — chaque app (gauche) et ses dépendances réellement appelées (droite). Le ruban part de la couleur du nœud source. Nœuds : <b style='color:#5b9bff'>bleu=ingress</b>, <b style='color:#6b7688'>gris=service</b>, <b style='color:oklch(0.88 0.22 178.95)'>vert=workload</b>, <b style='color:#8b5cf6'>violet=statefulset/base</b>. Rubans : <b style='color:#e0a94a'>ambre=déclaré (config) non observé</b> · <b style='color:#ef4444'>rouge=dérive réseau</b> = trafic observé <b>non autorisé par une NetworkPolicy</b> (rouge seulement si la cible est protégée).";
-  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); renderInteractions(g); } catch(e){ setStatus("API injoignable : "+e.message); } }
+  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderInteractions(g); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow"); setLegend(KIND_LEGEND);
   el("hint").innerHTML="Exécution — colonnes par <b>rôle</b> (plusieurs types empilés, colonnes vides masquées) : <b style='color:#d0a15e'>Dépendances</b> (PVC / Secret / ConfigMap) → <b>Workload</b> → Pod → Service → Ingress, groupé par namespace. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod. <span style='color:#5b6472'>molette = zoom · espace + glisser = déplacer.</span>";
-  try { const g=await ensureGraph(); fillNsPicker(g); if(secMode) await ensureSec(g); renderFlow(g, el("ns-picker").value); }
+  try { const g=await ensureGraph(); fillNsPicker(g); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderFlow(g, el("ns-picker").value); }
   catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
   setLegend('<span class="chip" style="color:var(--muted)">Couleur = namespace · hauteur = nombre d\'objets</span>');
   el("hint").textContent="Vue d'ensemble — Cluster → Namespaces → Types. La hauteur = le nombre d'objets.";
-  try { renderOverview(await ensureNodes()); } catch(e){ setStatus("API injoignable : "+e.message); } }
+  try { const nn=await ensureNodes(); if(gitMode) buildGitIndex(nn); renderOverview(nn); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore"); setLegend(LAYER_LEGEND);
   el("hint").textContent="Explorer — choisis un départ puis Charger. Survole pour isoler les liens, clique pour le détail et déplier le cercle suivant.";
   try { fillPicker(await ensureNodes()); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showAccess(){ document.body.dataset.mode="access"; setTab("access"); setLegend(ACCESS_LEGEND);
   el("hint").innerHTML="Accès &amp; identité — pour chaque app : ses <b style='color:#d98a5b'>secrets</b> référencés (nom seul, jamais la valeur) → le <b>workload</b> → le <b style='color:#7c9cf5'>ServiceAccount</b> sous lequel il tourne → les <b style='color:#c678c9'>Rôles</b> qui lui sont accordés (RBAC). Répond à « qui tourne comme quoi, et qu'est-ce que ça peut faire ».";
-  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); renderAccess(g); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
+  try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderAccess(g); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showSecurity(){ document.body.dataset.mode="security"; setTab("security"); setLegend(SEC_LEGEND);
   el("hint").innerHTML="Sécurité — <b>points d'attention</b> (informer, pas corriger) : durcissement pod, RBAC/escalation, exposition, dérive réseau. Gravité <b style='color:#e3c341'>faible</b> → <b style='color:#e0883a'>moyen</b> → <b style='color:#e8622f'>élevé</b> → <b style='color:#ef4444'>critique</b>. Active « mode sécu » (en haut) sur les autres onglets pour colorer ces risques directement sur la carte.";
   try { const g=await ensureGraph(); await ensureSec(g); renderSecurity(g); }
@@ -1044,12 +1080,25 @@ function setTab(m){ closeSecPanel(); for (const t of ["flow","interactions","acc
 el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-security").onclick=showSecurity; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
 el("ns-picker").onchange=()=>{ if(gGraph){ if(secMode) ensureSec(gGraph).then(()=>renderFlow(gGraph, el("ns-picker").value)); else renderFlow(gGraph, el("ns-picker").value); } };
 el("hide-infra").onchange=()=>{ if(gGraph) renderInteractions(gGraph); };
-el("sec-mode").onchange=async()=>{ secMode=el("sec-mode").checked; const m=document.body.dataset.mode;
-  document.body.classList.toggle("secmode", secMode); if(!secMode) closeSecPanel();
-  if(secMode && gGraph){ try{ await ensureSec(gGraph); }catch(_){} }
+function rerenderOverlay(){ const m=document.body.dataset.mode;
   if(m==="flow"&&gGraph) renderFlow(gGraph, el("ns-picker").value);
   else if(m==="interactions"&&gGraph) renderInteractions(gGraph);
-  else if(m==="access"&&gGraph) renderAccess(gGraph); };
+  else if(m==="access"&&gGraph) renderAccess(gGraph);
+  else if(m==="overview"&&gNodes) renderOverview(gNodes); }
+el("sec-mode").onchange=async()=>{ secMode=el("sec-mode").checked; if(secMode){ gitMode=false; el("git-mode").checked=false; }
+  document.body.classList.toggle("secmode", secMode); if(!secMode) closeSecPanel();
+  if(secMode && gGraph){ try{ await ensureSec(gGraph); }catch(_){} }
+  rerenderOverlay(); };
+el("git-mode").onchange=()=>{ gitMode=el("git-mode").checked; if(gitMode){ secMode=false; el("sec-mode").checked=false; document.body.classList.remove("secmode"); closeSecPanel(); }
+  if(gitMode){ buildGitIndex(gGraph||gNodes); }
+  rerenderOverlay();
+  const m=document.body.dataset.mode;
+  if(gitMode){ setLegend(GIT_LEGEND);
+    if(gitByNode.size===0) setStatus("mode GitOps : aucune donnée déclarée — lancer le hub avec --git-dir=<dossier de YAML rendus>");
+    else { const c=gitCounts(); setStatus(`GitOps : ${c.insync} en phase · ${c.missing} déclaré(s) non déployé(s) · ${c.unmanaged} hors Git`); }
+  } else { // restaurer la légende normale de l'onglet
+    if(m==="flow"||m==="interactions") setLegend(KIND_LEGEND); else if(m==="access") setLegend(ACCESS_LEGEND); }
+};
 el("refresh").onclick=async()=>{ gGraph=null; gNodes=null; gFindings=null; secIndex=null;
   const m=document.body.dataset.mode;
   if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="access") showAccess(); else if(m==="security") showSecurity(); else if(m==="overview") showOverviewTab(); else showExplore(); };
@@ -1068,6 +1117,9 @@ const ACCESS_LEGEND =
 const SEC_LEGEND =
   chip("#e3c341","faible") + chip("#e0883a","moyen") + chip("#e8622f","élevé") + chip("#ef4444","critique") +
   `<span class="chip" style="margin-left:10px;color:var(--muted)">gravité croissante · en mode sécu, gris = pas de point d'attention</span>`;
+const GIT_LEGEND =
+  chip("#3fb950","en phase") + chip("#e0883a","déclaré non déployé") + chip("#ef4444","hors Git (non déclaré)") +
+  `<span class="chip" style="margin-left:10px;color:var(--muted)">déclaré vs observé · gris = non jugé</span>`;
 const setLegend = html => { el("legend").innerHTML = html; };
 setLegend(KIND_LEGEND);
 

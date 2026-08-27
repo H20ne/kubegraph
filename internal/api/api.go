@@ -111,6 +111,8 @@ func (h *Handler) nodes(w http.ResponseWriter, _ *http.Request) {
 			Name:       n.Name,
 			Layer:      string(n.Layer),
 			NoSelector: n.NoSelector,
+			Origin:     string(n.Origin),
+			Drift:      n.Drift,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -130,6 +132,7 @@ func (h *Handler) graph(w http.ResponseWriter, _ *http.Request) {
 		out.Nodes = append(out.Nodes, listNodeDTO{
 			ID: idStr(n.ID), Cluster: n.ID.ClusterID, Kind: n.Kind,
 			Namespace: n.Namespace, Name: n.Name, Layer: string(n.Layer), NoSelector: n.NoSelector,
+			Origin: string(n.Origin), Drift: n.Drift,
 		})
 	}
 	for _, e := range srcEdges {
@@ -207,6 +210,8 @@ type listNodeDTO struct {
 	Name       string `json:"name"`
 	Layer      string `json:"layer"`
 	NoSelector bool   `json:"noSelector,omitempty"`
+	Origin     string `json:"origin,omitempty"`
+	Drift      string `json:"drift,omitempty"`
 }
 
 type edgeDTO struct {

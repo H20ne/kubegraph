@@ -56,6 +56,11 @@ type Node struct {
 	// IP : pod IP (status.podIP) ou ClusterIP du service. Sert à résoudre les
 	// flux observés (conntrack) en nœuds. Vide si sans IP routable.
 	IP string
+
+	// Drift GitOps (déclaré vs observé), rempli seulement si une source déclarée
+	// est fournie : "" (non jugé), "insync", "missing" (déclaré non déployé),
+	// "unmanaged" (déployé hors Git).
+	Drift string
 }
 
 // EdgeType énumère les relations reconnues entre nœuds. On démarre le MVP avec
