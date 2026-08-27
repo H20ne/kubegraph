@@ -56,6 +56,24 @@ func New(kubeconfigPath, clusterID string) (*Source, error) {
 	return &Source{clusterID: clusterID, client: client, dyn: dyn}, nil
 }
 
+// NewForContext construit une source sur un CONTEXTE kubeconfig précis
+// (multi-cluster). clusterID = nom du contexte. Sert à collecter N clusters.
+func NewForContext(kubeconfigPath, contextName string) (*Source, error) {
+	cfg, err := loadConfigForContext(kubeconfigPath, contextName)
+	if err != nil {
+		return nil, err
+	}
+	client, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("client kubernetes (%s) : %w", contextName, err)
+	}
+	dyn, err := dynamic.NewForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("client dynamique (%s) : %w", contextName, err)
+	}
+	return &Source{clusterID: contextName, client: client, dyn: dyn}, nil
+}
+
 // NewWithClient injecte un client (utilisé par les tests avec le fake client).
 func NewWithClient(client kubernetes.Interface, clusterID string) *Source {
 	return &Source{clusterID: clusterID, client: client}
@@ -192,6 +210,11 @@ func (s *Source) Collect(ctx context.Context) ([]graph.Node, []graph.Edge, error
 	nodes = append(nodes, an...)
 	edges = append(edges, ae...)
 
+	// Nœuds physiques (workers) + placement des pods : Node + RUNS_ON (Pod -> Node).
+	nn, nne := s.collectNodes(ctx, pods.Items)
+	nodes = append(nodes, nn...)
+	edges = append(edges, nne...)
+
 	// Points d'attention sécurité (structurels) : pod / rbac / exposition.
 	s.findings = s.computeFindings(ctx, pods.Items, services.Items, ingresses.Items, topWL)
 
@@ -289,4 +312,18 @@ func loadConfig(path string) (*rest.Config, string, error) {
 		ctxName = raw.CurrentContext
 	}
 	return cfg, ctxName, nil
+}
+
+// loadConfigForContext charge la config d'un contexte kubeconfig nommé (multi-cluster).
+func loadConfigForContext(path, contextName string) (*rest.Config, error) {
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if path != "" {
+		rules.ExplicitPath = path
+	}
+	cc := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{CurrentContext: contextName})
+	cfg, err := cc.ClientConfig()
+	if err != nil {
+		return nil, fmt.Errorf("chargement du contexte %q : %w", contextName, err)
+	}
+	return cfg, nil
 }

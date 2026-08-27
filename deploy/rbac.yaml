@@ -29,7 +29,7 @@ rules:
   # NetworkPolicies). NB : on ne demande PAS "secrets" — les secrets utilisés
   # sont déduits des specs des workloads, sans jamais lire leurs valeurs.
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "namespaces", "persistentvolumeclaims", "persistentvolumes", "serviceaccounts"]
+    resources: ["pods", "services", "configmaps", "namespaces", "persistentvolumeclaims", "persistentvolumes", "serviceaccounts", "nodes"]
     verbs: ["get", "list", "watch"]
   # RBAC : Roles, ClusterRoles et leurs bindings (« qui peut quoi »). LECTURE
   # SEULE. NB : on ne demande TOUJOURS PAS "secrets" — les secrets utilisés sont

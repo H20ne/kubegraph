@@ -25,6 +25,7 @@ const (
 	LayerConfig     Layer = "config"     // ConfigMap, Secret, HPA...
 	LayerSecurity   Layer = "security"   // ServiceAccount, RBAC, NetworkPolicy, PDB...
 	LayerStorage    Layer = "storage"    // PersistentVolumeClaim, PersistentVolume...
+	LayerInfra      Layer = "infra"      // Node (worker)...
 	LayerUnknown    Layer = "unknown"
 )
 
@@ -87,6 +88,7 @@ const (
 	EdgeProtectsOut EdgeType = "PROTECTS_OUT" // NetworkPolicy -> workload isolé en SORTIE
 
 	// Accès & identité (qui tourne comme quoi, et ce que ça peut faire) :
+	EdgeRunsOn     EdgeType = "RUNS_ON"    // Pod -> Node (spec.nodeName) : placement sur un worker
 	EdgeRunsAs     EdgeType = "RUNS_AS"    // Workload -> ServiceAccount (spec.serviceAccountName)
 	EdgeGrants     EdgeType = "GRANTS"     // ServiceAccount -> Role/ClusterRole (via un binding)
 	EdgeReferences EdgeType = "REFERENCES" // Workload -> Secret référencé (NOM seul, jamais la valeur)

@@ -55,20 +55,25 @@ if [ "${1:-}" = "--git-snapshot" ]; then
   exit 0
 fi
 
-# Passe le dossier GitOps au hub si fourni en flag (--git-dir) ou en variable.
-GIT_ARGS=()
+# Sources déclarées / multi-cluster : flags ou variables d'environnement.
+#   KUBEGRAPH_GITDIR   dossier de YAML rendus (dérive GitOps)
+#   KUBEGRAPH_TFJSON   fichier `terraform show -json` (dérive Terraform, K8s only)
+#   KUBEGRAPH_CONTEXTS contextes kubeconfig séparés par des virgules (multi-cluster)
+EXTRA_ARGS=()
 if [ "${1:-}" = "--git-dir" ] && [ -n "${2:-}" ]; then
-  GIT_ARGS=(--git-dir "$2"); export KUBEGRAPH_GITDIR="$2"
+  EXTRA_ARGS+=(--git-dir "$2"); export KUBEGRAPH_GITDIR="$2"
 elif [ -n "${KUBEGRAPH_GITDIR:-}" ]; then
-  GIT_ARGS=(--git-dir "$KUBEGRAPH_GITDIR")
+  EXTRA_ARGS+=(--git-dir "$KUBEGRAPH_GITDIR")
 fi
+[ -n "${KUBEGRAPH_TFJSON:-}" ]   && EXTRA_ARGS+=(--tf-json "$KUBEGRAPH_TFJSON")
+[ -n "${KUBEGRAPH_CONTEXTS:-}" ] && EXTRA_ARGS+=(--contexts "$KUBEGRAPH_CONTEXTS")
 
 # Déjà root ? on lance directement. Sinon on repasse sous sudo en gardant l'env.
 if [ "$(id -u)" -eq 0 ]; then
-  exec "$GO" run ./cmd/kubegraph --agent "${GIT_ARGS[@]}"
+  exec "$GO" run ./cmd/kubegraph --agent "${EXTRA_ARGS[@]}"
 else
   echo "→ élévation sudo (lecture conntrack) ; l'environnement est préservé."
   exec sudo -E env "PATH=$PATH" "KUBECONFIG=$KUBECONFIG" "KUBEGRAPH_ADDR=$KUBEGRAPH_ADDR" \
-    "KUBEGRAPH_GITDIR=${KUBEGRAPH_GITDIR:-}" \
-    "$GO" run ./cmd/kubegraph --agent "${GIT_ARGS[@]}"
+    "KUBEGRAPH_GITDIR=${KUBEGRAPH_GITDIR:-}" "KUBEGRAPH_TFJSON=${KUBEGRAPH_TFJSON:-}" "KUBEGRAPH_CONTEXTS=${KUBEGRAPH_CONTEXTS:-}" \
+    "$GO" run ./cmd/kubegraph --agent "${EXTRA_ARGS[@]}"
 fi

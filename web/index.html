@@ -65,6 +65,15 @@
   body[data-mode="flow"] #flow-controls { display:flex; }
   body[data-mode="explore"] #explorer-controls { display:flex; }
   body[data-mode="interactions"] #int-controls { display:inline-flex; }
+  /* Filtre d'affichage par catégorie (chips) — Exécution & Explorer. */
+  #kind-filter { display:none; gap:6px; align-items:center; flex-wrap:wrap; }
+  body[data-mode="flow"] #kind-filter, body[data-mode="explore"] #kind-filter { display:inline-flex; }
+  #kind-filter .kf-label { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.5px; margin-right:2px; }
+  .kf-chip { display:inline-flex; align-items:center; gap:6px; padding:3px 9px; font-size:12px; line-height:1;
+    border:1px solid var(--border); border-radius:20px; background:var(--panel); color:#e6edf3; cursor:pointer; transition:opacity .12s; }
+  .kf-chip .kf-dot { width:8px; height:8px; border-radius:50%; }
+  .kf-chip.off { opacity:.4; text-decoration:line-through; }
+  .kf-chip.off .kf-dot { background:#6b7688 !important; }
   body[data-mode="flow"] #sec-controls, body[data-mode="interactions"] #sec-controls, body[data-mode="access"] #sec-controls { display:inline-flex; }
   /* Interrupteur mode sécu : plus visible quand actif. */
   #sec-mode:checked + .lbl, .switch:has(#sec-mode:checked) { color:#e0883a; font-weight:700; }
@@ -135,6 +144,12 @@
   #explore-wrap { flex:1; min-height:0; display:none; }
   body[data-mode="explore"] #explore-wrap { display:flex; }
   #cy { flex:1; min-height:0; }
+  #attack-controls { display:none; gap:12px; align-items:center; flex-wrap:wrap; }
+  body[data-mode="attack"] #attack-controls { display:inline-flex; }
+  #attack-wrap { flex:1; min-height:0; display:none; position:relative; }
+  body[data-mode="attack"] #attack-wrap { display:flex; }
+  #acy { flex:1; min-height:0; }
+  #atk-empty { position:absolute; top:40%; left:0; right:0; text-align:center; color:var(--muted); font-size:13px; padding:0 40px; display:none; }
   aside { width:288px; flex:none; background:var(--panel); border-left:1px solid var(--border); padding:16px; overflow-y:auto; }
   aside .empty { color:var(--muted); font-size:12px; margin-top:8px; }
   aside h2 { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 10px; }
@@ -177,6 +192,7 @@
       <button id="tab-interactions" class="active">Réseau &amp; interactions</button>
       <button id="tab-access">Accès &amp; identité</button>
       <button id="tab-security">Sécurité</button>
+      <button id="tab-attack">Chemins d'attaque</button>
       <button id="tab-overview">Vue d'ensemble</button>
       <button id="tab-explore">Explorer</button>
     </div>
@@ -185,6 +201,8 @@
     <span id="flow-controls">
       <label>namespace <select id="ns-picker"></select></label>
     </span>
+    <label id="cluster-ctl" style="display:none">cluster <select id="cluster-picker"></select></label>
+    <span id="kind-filter"></span>
     <span id="int-controls">
       <label class="switch"><input type="checkbox" id="hide-infra" checked> masquer l'infra</label>
     </span>
@@ -200,6 +218,10 @@
       <button id="reset">Reset</button>
       <label class="switch"><input type="checkbox" id="showlabels" checked> noms</label>
     </span>
+    <span id="attack-controls">
+      <label>entrée <select id="atk-entry"><option value="__all__">Toutes les entrées</option></select></label>
+      <label class="switch"><input type="checkbox" id="atk-jewels" checked> chemins vers actif critique</label>
+    </span>
     <span id="status"></span>
   </header>
   <div class="hint" id="hint"></div>
@@ -209,6 +231,7 @@
     <div id="int-wrap"><div id="cyint"></div><div id="int-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="access-wrap"><div id="access"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="sec-wrap"><div id="sec"></div></div>
+    <div id="attack-wrap"><div id="acy"></div><div id="atk-empty"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <aside id="sec-panel"><button id="sec-panel-x" title="Fermer">✕</button><div id="sec-panel-body"></div></aside>
     <div id="sankey-wrap"><div id="sankey"></div><div class="pzhint">molette = zoom · espace + glisser = déplacer · double-clic = réajuster</div></div>
     <div id="explore-wrap">
@@ -243,10 +266,64 @@
 const LAYER = {
   workload:{color:"#58a6ff",label:"workload"}, networking:{color:"#3fb950",label:"networking"},
   config:{color:"#bc8cff",label:"config"}, storage:{color:"#d0a15e",label:"storage"},
-  security:{color:"#f85149",label:"security"}, unknown:{color:"#8b949e",label:"unknown"},
+  security:{color:"#f85149",label:"security"}, infra:{color:"#e3b341",label:"infra"}, unknown:{color:"#8b949e",label:"unknown"},
 };
 const layerColor = l => (LAYER[l]||LAYER.unknown).color;
 const el = id => document.getElementById(id);
+
+// --- Filtre d'affichage par catégorie de type (réduire/adapter la vue) ---
+// Chaque kind appartient à une catégorie togglable. Une catégorie masquée retire
+// les nœuds ET leurs arêtes (pas de reroutage auto → comportement prévisible).
+const KIND_CAT = {
+  Deployment:"wl", StatefulSet:"wl", DaemonSet:"wl", Job:"wl", CronJob:"wl", ReplicaSet:"wl",
+  Pod:"pod", Service:"svc", Ingress:"ing",
+  ConfigMap:"config", Secret:"config",
+  PersistentVolumeClaim:"storage", PersistentVolume:"storage",
+  ServiceAccount:"security", Role:"security", ClusterRole:"security",
+  RoleBinding:"security", ClusterRoleBinding:"security", NetworkPolicy:"security", PodDisruptionBudget:"security",
+  HorizontalPodAutoscaler:"autoscaling", Node:"infra",
+};
+const KF_LABEL = { wl:"Workloads", pod:"Pods", svc:"Services", ing:"Ingress",
+  config:"Config", storage:"Stockage", security:"Sécurité", autoscaling:"Autoscaling", infra:"Nodes", autre:"Autre" };
+const KF_COLOR = { wl:"#5eb5c9", pod:"#5fb3c9", svc:"#8892a0", ing:"#5b9bff",
+  config:"#bc8cff", storage:"#d0a15e", security:"#f85149", autoscaling:"#3fb950", infra:"#8b949e", autre:"#6b7688" };
+const catOfKind = k => KIND_CAT[k] || "autre";
+let HIDDEN_CATS = new Set();
+try { const s = localStorage.getItem("kubegraph_hidden_cats"); if (s) HIDDEN_CATS = new Set(JSON.parse(s)); } catch (_) {}
+const kindShown = k => !HIDDEN_CATS.has(catOfKind(k));
+function saveHiddenCats(){ try { localStorage.setItem("kubegraph_hidden_cats", JSON.stringify([...HIDDEN_CATS])); } catch (_) {} }
+// Construit la barre de chips pour les catégories `cats`, re-rend l'onglet au clic.
+function buildKindFilter(cats){
+  const host = el("kind-filter"); if(!host) return; host.innerHTML = "";
+  const lab = document.createElement("span"); lab.className = "kf-label"; lab.textContent = "afficher"; host.appendChild(lab);
+  for (const c of cats){ const b = document.createElement("button");
+    b.className = "kf-chip" + (HIDDEN_CATS.has(c) ? " off" : "");
+    b.innerHTML = `<span class="kf-dot" style="background:${KF_COLOR[c]||KF_COLOR.autre}"></span>${KF_LABEL[c]||c}`;
+    b.title = "afficher / masquer " + (KF_LABEL[c]||c);
+    b.onclick = () => { if (HIDDEN_CATS.has(c)) HIDDEN_CATS.delete(c); else HIDDEN_CATS.add(c);
+      saveHiddenCats(); b.classList.toggle("off"); applyKindFilter(); };
+    host.appendChild(b); }
+}
+function applyKindFilter(){ const m = document.body.dataset.mode;
+  if (m === "flow" && gGraph) renderFlow(gGraph, el("ns-picker").value);
+  else if (m === "explore") applyExploreFilter(); }
+
+// --- Portée par cluster (multi-cluster) : scope Exécution + départ Explorer ---
+let activeCluster = "__all__", _multiCluster = false;
+const clusterOk = n => activeCluster === "__all__" || !n.cluster || n.cluster === activeCluster;
+function fillClusterPicker(nodes){
+  const set = new Set(); for (const n of nodes) if (n.cluster) set.add(n.cluster);
+  _multiCluster = set.size > 1;
+  const sel = el("cluster-picker");
+  if (!_multiCluster){ activeCluster = "__all__"; return; }
+  const cur = sel.value; sel.innerHTML = "";
+  const all = document.createElement("option"); all.value = "__all__"; all.textContent = `Tous les clusters (${set.size})`; sel.appendChild(all);
+  for (const c of [...set].sort()){ const o = document.createElement("option"); o.value = c; o.textContent = c; sel.appendChild(o); }
+  if (cur && (cur === "__all__" || set.has(cur))) sel.value = cur;
+  activeCluster = sel.value;
+}
+function updateClusterCtl(){ const m = document.body.dataset.mode;
+  el("cluster-ctl").style.display = (_multiCluster && (m === "flow" || m === "explore")) ? "inline-flex" : "none"; }
 const apiBase = () => (el("api").value.trim().replace(/\/+$/,"") || location.origin);
 const setStatus = t => { el("status").textContent = t; };
 const esc = s => String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -306,7 +383,7 @@ function renderFlow(graph, ns) {
 
   // Liens gauche→droite entre rôles.
   const links = [];
-  const push = (s,t) => { if (byId[s] && byId[t] && inNs(byId[s]) && inNs(byId[t])) links.push({ s, t }); };
+  const push = (s,t) => { if (byId[s] && byId[t] && inNs(byId[s]) && inNs(byId[t]) && clusterOk(byId[s]) && clusterOk(byId[t]) && kindShown(byId[s].kind) && kindShown(byId[t].kind)) links.push({ s, t }); };
   // Dépendances → Workload : PVC (USES wl→pvc) et Secret (REFERENCES wl→secret).
   for (const e of graph.edges) {
     if (e.type === "USES" && byId[e.target] && byId[e.target].kind === "PersistentVolumeClaim") push(e.target, e.source);
@@ -327,7 +404,7 @@ function renderFlow(graph, ns) {
 
   // Nœuds par colonne (rôle).
   const col = COLDEFS.map(()=>[]);
-  for (const n of graph.nodes) { if (!inNs(n)) continue; if (n.origin==="declared" && !gitMode) continue; const c = kindCol(n.kind); if (c >= 0) col[c].push(n); }
+  for (const n of graph.nodes) { if (!inNs(n)) continue; if (!clusterOk(n)) continue; if (n.origin==="declared" && !gitMode) continue; if (!kindShown(n.kind)) continue; const c = kindCol(n.kind); if (c >= 0) col[c].push(n); }
 
   // #pods par nœud (épaisseur + états).
   const pv = {};
@@ -550,6 +627,7 @@ const ICON_INNER = {
   config:'<path d="M4 4h11l5 5v11H4z"/><path d="M8 12h8M8 16h8"/>',
   HorizontalPodAutoscaler:'<path d="M3 12h18M7 8l-4 4 4 4M17 8l4 4-4 4"/>',
   PodDisruptionBudget:'<path d="M12 2l8 3v6c0 5-4 9-8 11-4-2-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/>',
+  Node:'<rect x="3" y="4" width="18" height="7" rx="1"/><rect x="3" y="13" width="18" height="7" rx="1"/><path d="M7 7.5h.01M7 16.5h.01"/>',
   default:'<circle cx="12" cy="12" r="7"/>',
 };
 function iconFor(kind){
@@ -565,6 +643,7 @@ function iconFor(kind){
   if(kind==="ConfigMap") return ICON_INNER.config;
   if(kind==="HorizontalPodAutoscaler") return ICON_INNER.HorizontalPodAutoscaler;
   if(kind==="PodDisruptionBudget") return ICON_INNER.PodDisruptionBudget;
+  if(kind==="Node") return ICON_INNER.Node;
   return ICON_INNER.default;
 }
 function iconURI(kind,color){ return "data:image/svg+xml;utf8,"+encodeURIComponent(
@@ -670,14 +749,21 @@ function relayout(){ const seed=cy.nodes(".seed");
     spacingFactor:1.4, padding:40, animate:true, animationDuration:350, avoidOverlap:true, grid:false, nodeDimensionsIncludeLabels:true }).run(); }
 function applyLabelToggle(){ cy.nodes().toggleClass("nolbl", !el("showlabels").checked); }
 function merge(ego){ cy.batch(()=>{ for(const n of ego.nodes){ const ex=cy.getElementById(n.id); if(ex.nonempty()) ex.data("degree",Math.min(ex.data("degree"),n.degree)); else cy.add({group:"nodes",data:{...n}}); maxDegree=Math.max(maxDegree,n.degree);} for(const e of ego.edges){ const id=`${e.source}__${e.type}__${e.target}`; if(cy.getElementById(id).empty()) cy.add({group:"edges",data:{id,source:e.source,target:e.target,type:e.type}});}});
-  cy.getElementById(ego.root).addClass("seed"); applyLabelToggle(); relayout(); }
+  cy.getElementById(ego.root).addClass("seed"); applyLabelToggle(); applyExploreFilter(); relayout(); }
+// Filtre d'affichage (Explorer) : masque/affiche les nœuds par catégorie, et
+// masque toute arête touchant un nœud masqué. Non destructif (show/hide seulement).
+function applyExploreFilter(){
+  cy.nodes().forEach(n => n.style("display", kindShown(n.data("kind")) ? "element" : "none"));
+  cy.edges().forEach(e => e.style("display",
+    (kindShown(e.source().data("kind")) && kindShown(e.target().data("kind"))) ? "element" : "none"));
+}
 async function fetchEgo(cluster,uid,depth){ const r=await fetch(`${apiBase()}/ego?cluster=${encodeURIComponent(cluster)}&uid=${encodeURIComponent(uid)}&depth=${depth}`); if(!r.ok) throw new Error(`${r.status} ${(await r.json()).error||""}`); return r.json(); }
 // Picker filtrable : un vrai cluster a des centaines de nœuds → une recherche
 // textuelle (type, nom, namespace) est indispensable pour choisir un départ.
 let _pickNodes=[];
 function fillPicker(nodes){ _pickNodes=nodes.slice().sort((a,b)=>(a.kind+a.name).localeCompare(b.kind+b.name)); renderPicker(el("picker-search").value||""); }
 function renderPicker(q){ const p=el("picker"), prev=p.value; p.innerHTML=""; const ql=q.trim().toLowerCase();
-  const list=_pickNodes.filter(n=> !ql || `${n.kind} ${n.name} ${n.namespace||""}`.toLowerCase().includes(ql));
+  const list=_pickNodes.filter(n=> clusterOk(n) && (!ql || `${n.kind} ${n.name} ${n.namespace||""}`.toLowerCase().includes(ql)));
   const zero=document.createElement("option"); zero.value=""; zero.textContent=list.length?`— (${list.length})`:"— aucun résultat"; p.appendChild(zero);
   for(const n of list){ const o=document.createElement("option"); o.value=JSON.stringify({cluster:n.cluster,id:n.id}); o.textContent=`${n.kind}/${n.name}${n.namespace?" · "+n.namespace:""}`; p.appendChild(o); }
   if(prev && [...p.options].some(o=>o.value===prev)) p.value=prev; }
@@ -713,7 +799,7 @@ cy.on("tap",e=>{ if(e.target===cy) closePanel(); });
 // Libellés FR courts des types d'arête (pour la liste des relations).
 const EDGE_FR = { OWNED_BY:"appartient à", SELECTS:"sélectionne", ROUTES_TO:"route vers",
   SCALES:"pilote", TRIGGERS:"déclenche", USES:"utilise", ALLOWS:"autorise", TALKS_TO:"parle à",
-  PROTECTS_IN:"protège (in)", PROTECTS_OUT:"protège (out)", RUNS_AS:"tourne comme", GRANTS:"accorde", REFERENCES:"référence" };
+  PROTECTS_IN:"protège (in)", PROTECTS_OUT:"protège (out)", RUNS_AS:"tourne comme", RUNS_ON:"tourne sur", GRANTS:"accorde", REFERENCES:"référence" };
 function openPanel(node){ el("panel-empty").style.display="none"; el("panel-body").style.display="block";
   el("p-kind").textContent=node.data("kind"); el("p-name").textContent=node.data("name"); el("p-ns").textContent=node.data("namespace")||"—";
   const lp=el("p-layer"); lp.textContent=node.data("layer"); lp.style.background=layerColor(node.data("layer"));
@@ -746,6 +832,213 @@ el("picker-search").oninput=()=>renderPicker(el("picker-search").value);
 el("zin").onclick=()=>cy.zoom({level:cy.zoom()*1.3,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
 el("zout").onclick=()=>cy.zoom({level:cy.zoom()/1.3,renderedPosition:{x:cy.width()/2,y:cy.height()/2}});
 el("zfit").onclick=()=>cy.fit(cy.elements(),40);
+
+/* =================== CHEMINS D'ATTAQUE — graphe d'atteinte (flux) =================== */
+// Compose les données DÉJÀ collectées (exposition, RUNS_AS, RBAC, REFERENCES,
+// durcissement pod) en un graphe de PRIMITIVES d'escalade : entrée exposée →
+// exécution → identité (SA) → capacité (RBAC / évasion) → actif critique.
+// Posture DÉFENSIVE : topologie des privilèges, « points de coupe » — pas d'exploit.
+// Tout chemin est « POSSIBLE, à vérifier » (admission control PSA/OPA inconnu).
+const ATK_COL = { entry:0, charge:1, identity:2, capability:3, target:4 };
+const ATK_ROLE_LABEL = { entry:"ENTRÉE", charge:"EXÉCUTION", identity:"IDENTITÉ", capability:"CAPACITÉ", target:"ACTIF CRITIQUE" };
+const ATK_COLOR = { entry:"#e8622f", charge:"#5b9bff", identity:"#bc8cff", capability:"#e0883a", target:"#ef4444" };
+
+// capOf : mappe un finding RBAC vers une capacité d'escalade + son actif cible.
+function capOf(f){
+  const s = ((f.title||"")+" "+(f.why||"")).toLowerCase();
+  if (/cluster-admin|tous les droits|\*.*\*|toutes les ressources/.test(s))
+    return { label:"cluster-admin (*:*)", tid:"jewel:cluster-admin", tl:"Cluster-admin", ts:"prise totale du cluster", tk:"ClusterRole", tech:"contrôle total", sev:"critical" };
+  if (/secret/.test(s))
+    return { label:"lecture des secrets", tid:"jewel:secrets", tl:"Secrets", ts:"vol de credentials", tk:"Secret", tech:"exfiltration de creds", sev:"high" };
+  if (/(créer|create).*(pod)|pods.*create|exec/.test(s))
+    return { label:"créer / exec des pods", tid:"jewel:node", tl:"Nœud (hôte)", ts:"pod privilégié → worker", tk:"Node", tech:"évasion vers l'hôte", sev:"high" };
+  if (/impersonate|usurp/.test(s))
+    return { label:"impersonation", tid:"jewel:identity", tl:"Autres identités", ts:"usurpation d'identité", tk:"ServiceAccount", tech:"usurpation", sev:"high" };
+  if (/token/.test(s))
+    return { label:"création de token SA", tid:"jewel:identity", tl:"Autres identités", ts:"jetons d'autres SA", tk:"ServiceAccount", tech:"vol de jeton", sev:"high" };
+  return { label:(f.title||"droits étendus"), tid:"jewel:rbac", tl:"Droits étendus", ts:"élévation RBAC", tk:"Role", tech:"élévation", sev:f.severity };
+}
+
+function buildAttack(graph, findings){
+  const byId={}; for(const n of graph.nodes) byId[n.id]=n;
+  const fList=findings||[]; const fByNode={};
+  for(const f of fList){ (fByNode[f.node]=fByNode[f.node]||[]).push(f); }
+  const selects=[],routes=[],runsAs={},refs={},owned={};
+  for(const e of graph.edges){
+    if(e.type==="SELECTS") selects.push(e);
+    else if(e.type==="ROUTES_TO") routes.push(e);
+    else if(e.type==="RUNS_AS") runsAs[e.source]=e.target;
+    else if(e.type==="REFERENCES"){ (refs[e.source]=refs[e.source]||[]).push(e.target); }
+    else if(e.type==="OWNED_BY") owned[e.source]=e.target;
+  }
+  const topWL=id=>{ let c=id,g=0; while(c&&g++<12){ const k=byId[c]&&byId[c].kind; if(WKINDS.includes(k)) return c; c=owned[c]; } return null; };
+  const podsOfSvc={}; for(const e of selects){ (podsOfSvc[e.source]=podsOfSvc[e.source]||[]).push(e.target); }
+  const svcOfIng={}; for(const e of routes){ (svcOfIng[e.source]=svcOfIng[e.source]||[]).push(e.target); }
+  // V2 : placement réel (RUNS_ON) pour résoudre le node d'évasion et les voisins.
+  const podsOfWL={}; for(const n of graph.nodes){ if(n.kind==="Pod"){ const w=topWL(n.id); if(w){ (podsOfWL[w]=podsOfWL[w]||[]).push(n.id); } } }
+  const nodeOfPod={}, podsOfNode={};
+  for(const e of graph.edges){ if(e.type==="RUNS_ON"){ nodeOfPod[e.source]=e.target; (podsOfNode[e.target]=podsOfNode[e.target]||[]).push(e.source); } }
+
+  const N=new Map(), E=[]; const entries=[];
+  const addN=(id,d)=>{ if(!N.has(id)) N.set(id,Object.assign({id},d)); return id; };
+  const addE=(s,t,d)=>{ E.push(Object.assign({id:s+"__"+t+"__"+(d.tech||""),source:s,target:t},d)); };
+
+  const expanded=new Set();
+  function expandWorkload(w){
+    if(expanded.has(w)) return; expanded.add(w);
+    const wl=byId[w]; if(!wl) return; const wid="atk:wl:"+w;
+    // Évasion conteneur -> hôte si durcissement pod critique/élevé (privileged/hostPath…).
+    const podF=(fByNode[w]||[]).filter(f=>f.category==="pod" && (f.severity==="critical"||f.severity==="high"));
+    if(podF.length){ const capid=wid+":evade";
+      addN(capid,{label:podF[0].title,sub:"capacité",role:"capability",sev:podF[0].severity,kind:"Node",why:podF[0].why});
+      addE(wid,capid,{tech:"conteneur faible",sev:podF[0].severity});
+      // V2 : nœuds hôtes RÉELS (via RUNS_ON) plutôt qu'un « hôte » générique.
+      const hosts=new Set(); for(const pod of (podsOfWL[w]||[])){ const nd=nodeOfPod[pod]; if(nd) hosts.add(nd); }
+      if(hosts.size===0){ const tid="jewel:node"; addN(tid,{label:"Nœud (hôte)",sub:"placement inconnu (RBAC nodes ?)",role:"target",sev:"high",kind:"Node",jewel:true});
+        addE(capid,tid,{tech:"évasion vers l'hôte",sev:"high"}); }
+      else for(const nd of hosts){ const ndn=byId[nd], tid="atk:node:"+nd;
+        addN(tid,{label:ndn?ndn.name:"node",sub:"worker (hôte)",role:"target",sev:"critical",kind:"Node",jewel:true,real:nd});
+        addE(capid,tid,{tech:"évasion vers l'hôte",sev:"critical"});
+        // Pods VOISINS co-hébergés → mouvement latéral (borné à 4).
+        let shown=0; for(const pod of (podsOfNode[nd]||[])){ const nw=topWL(pod); if(!nw||nw===w) continue;
+          const nwl=byId[nw]; if(!nwl) continue; const nwid="atk:wl:"+nw;
+          addN(nwid,{label:nwl.name,sub:nwl.kind+" · voisin",role:"charge",sev:"high",kind:nwl.kind,real:nw});
+          addE(tid,nwid,{tech:"pod voisin (même hôte)",sev:"high"});
+          if(++shown>=4) break; }
+      }
+    }
+    // Identité (SA) puis capacités RBAC.
+    const sa=runsAs[w];
+    if(sa){ const san=byId[sa]; const said="atk:sa:"+sa;
+      addN(said,{label:san?san.name:"ServiceAccount",sub:"ServiceAccount",role:"identity",sev:"low",kind:"ServiceAccount",real:sa});
+      addE(wid,said,{tech:"jeton du SA",sev:"low"});
+      for(const f of (fByNode[sa]||[])){ if(f.category!=="rbac") continue; const c=capOf(f);
+        const capid="atk:cap:"+sa+":"+f.id; addN(capid,{label:c.label,sub:"capacité",role:"capability",sev:f.severity,kind:"Role",why:f.why});
+        addE(said,capid,{tech:"RBAC",sev:f.severity});
+        addN(c.tid,{label:c.tl,sub:c.ts,role:"target",sev:c.sev||f.severity,kind:c.tk,jewel:true});
+        addE(capid,c.tid,{tech:c.tech,sev:c.sev||f.severity});
+      }
+    }
+    // Secrets référencés = actif.
+    for(const s of (refs[w]||[])){ const sec=byId[s]; const sid="atk:sec:"+s;
+      addN(sid,{label:sec?sec.name:"secret",sub:"Secret",role:"target",sev:"high",kind:"Secret",jewel:true,real:s});
+      addE(wid,sid,{tech:"lit un secret",sev:"high"}); }
+  }
+
+  // 1) Entrées = expositions (findings category exposure) → workloads derrière.
+  const seededWL=new Set();
+  for(const f of fList){ if(f.category!=="exposure") continue; const ex=byId[f.node]; if(!ex) continue;
+    const eid="atk:entry:"+f.node; addN(eid,{label:ex.name,sub:ex.kind+" · exposé",role:"entry",sev:f.severity,kind:ex.kind,real:f.node});
+    entries.push({id:eid,name:ex.kind+"/"+ex.name});
+    let pods=[]; if(ex.kind==="Ingress"){ for(const svc of (svcOfIng[f.node]||[])) pods.push(...(podsOfSvc[svc]||[])); }
+    else pods=podsOfSvc[f.node]||[];
+    const wls=new Set(); for(const p of pods){ wls.add(topWL(p)||p); }
+    for(const w of wls){ const wl=byId[w]; if(!wl) continue; const wid="atk:wl:"+w;
+      addN(wid,{label:wl.name,sub:wl.kind,role:"charge",sev:"medium",kind:wl.kind,real:w});
+      addE(eid,wid,{tech:"exposé → exécution",sev:f.severity}); seededWL.add(w); expandWorkload(w); }
+  }
+  // 2) Hypothèse « pod déjà compromis » : workloads à SA risqué non atteints par une entrée.
+  for(const w of Object.keys(runsAs)){ if(seededWL.has(w)) continue; const sa=runsAs[w];
+    const risky=(fByNode[sa]||[]).some(f=>f.category==="rbac"); const wl=byId[w];
+    if(!risky || !wl) continue; const eid="atk:hyp:"+w, wid="atk:wl:"+w;
+    addN(eid,{label:wl.name,sub:"compromission supposée",role:"entry",sev:"medium",kind:wl.kind,real:w});
+    entries.push({id:eid,name:"hypothèse · "+wl.name});
+    addN(wid,{label:wl.name,sub:wl.kind,role:"charge",sev:"medium",kind:wl.kind,real:w});
+    addE(eid,wid,{tech:"pod compromis",sev:"medium"}); expandWorkload(w);
+  }
+  return { nodes:[...N.values()], edges:E, entries };
+}
+
+// V2 : SCORING des chemins. Pour chaque entrée, on suit le graphe et on note les
+// actifs critiques atteints + la pire gravité. Score = tri des entrées, du plus
+// dangereux au moins. Reste « possible » : on classe le risque, on ne l'affirme pas.
+function scoreEntries(atk){
+  const adj={}; for(const e of atk.edges){ (adj[e.source]=adj[e.source]||[]).push(e.target); }
+  const nById={}; for(const n of atk.nodes) nById[n.id]=n;
+  for(const en of atk.entries){ const seen=new Set(), st=[en.id], jset=new Set();
+    while(st.length){ const x=st.pop(); if(seen.has(x)) continue; seen.add(x);
+      if(nById[x] && nById[x].jewel) jset.add(x);
+      (adj[x]||[]).forEach(y=>st.push(y)); }
+    let worst="info"; for(const j of jset){ const s=nById[j].sev||"info"; if((SEV[s]||0)>(SEV[worst]||0)) worst=s; }
+    en.jewels=jset.size; en.worstSev=worst; en.score=(SEV[worst]||0)*100 + jset.size*5;
+  }
+  atk.entries.sort((a,b)=> b.score-a.score || a.name.localeCompare(b.name));
+}
+
+// Cytoscape dédié aux chemins d'attaque (mêmes cartes + coudes + flux que l'Explorer).
+const acy = cytoscape({ container: el("acy"), minZoom:0.2, maxZoom:3, wheelSensitivity:0.25,
+  style: [
+    { selector:"node", style:{ "shape":"round-rectangle", "background-color":"#12161d", "background-opacity":1,
+      "width":cardW, "height":46, "border-width":2, "border-color":e=>ATK_COLOR[e.data("role")]||"#6b7688",
+      "background-image":e=>iconURI(e.data("kind"),ATK_COLOR[e.data("role")]||"#8b949e"),
+      "background-width":"20px","background-height":"20px","background-position-x":"13px","background-position-y":"50%",
+      "background-clip":"none","background-fit":"none",
+      "label":e=>`${e.data("label")}\n${e.data("sub")||""}`, "text-wrap":"wrap", "text-max-width":"150px",
+      "font-size":11, "font-weight":600, "color":"#e8eef5", "line-height":1.3,
+      "text-valign":"center", "text-halign":"center", "text-margin-x":16, "min-zoomed-font-size":6 }},
+    { selector:'node[?jewel]', style:{ "border-width":3, "border-color":"#ef4444" }},
+    { selector:"edge", style:{ "width":2.4, "line-color":e=>SEV_COLOR[e.data("sev")]||"#39424f", "curve-style":"taxi",
+      "taxi-direction":"horizontal", "taxi-turn":"40%", "taxi-turn-min-distance":"8px",
+      "target-arrow-shape":"triangle", "target-arrow-color":e=>SEV_COLOR[e.data("sev")]||"#39424f", "arrow-scale":0.9,
+      "line-style":"dashed", "line-dash-pattern":[9,7],
+      "label":"data(tech)", "font-size":8.5, "color":"#9fb0c4", "text-rotation":"none",
+      "text-background-color":"#0e1116", "text-background-opacity":1, "text-background-padding":2 }},
+    { selector:".atkfade", style:{ "opacity":0.12 }},
+  ],
+});
+let _atk=null, _atkDash=0, _atkRaf=null;
+function atkFlow(){ if(_atkRaf) return; const step=()=>{ _atkDash-=0.9;
+  acy.edges(":visible").not(".atkfade").style("line-dash-offset",_atkDash); _atkRaf=requestAnimationFrame(step); };
+  _atkRaf=requestAnimationFrame(step); }
+function atkStopFlow(){ if(_atkRaf){ cancelAnimationFrame(_atkRaf); _atkRaf=null; } }
+function fillAtkEntry(entries){ const sel=el("atk-entry"); const cur=sel.value; sel.innerHTML="";
+  const all=document.createElement("option"); all.value="__all__"; all.textContent=`Toutes les entrées (${entries.length})`; sel.appendChild(all);
+  for(const e of entries){ const o=document.createElement("option"); o.value=e.id;
+    const sev=e.worstSev&&e.worstSev!=="info" ? ` — ${SEV_LABEL[e.worstSev]} · ${e.jewels} actif(s)` : "";
+    o.textContent=e.name+sev; sel.appendChild(o); }
+  if(cur && [...sel.options].some(o=>o.value===cur)) sel.value=cur; }
+
+function renderAttack(){
+  if(!gGraph){ return; }
+  _atk=buildAttack(gGraph, gFindings||[]);
+  scoreEntries(_atk);
+  fillAtkEntry(_atk.entries);
+  acy.elements().remove();
+  if(!_atk.nodes.length){ el("atk-empty").style.display="block";
+    el("atk-empty").innerHTML="Aucun chemin d'attaque structurel détecté : pas d'exposition ni de SA sur-privilégié dans les données actuelles.<br>Ce n'est pas une preuve d'absence de risque — compléter avec un scanner (kube-bench / kubescape).";
+    setStatus("chemins d'attaque : 0"); return; }
+  el("atk-empty").style.display="none";
+  acy.add(_atk.nodes.map(n=>({group:"nodes",data:n})));
+  acy.add(_atk.edges.map(e=>({group:"edges",data:e})));
+  // Placement en colonnes par rôle (flux gauche → droite).
+  const colW=270, byCol={}; acy.nodes().forEach(n=>{ const c=ATK_COL[n.data("role")]??2; (byCol[c]=byCol[c]||[]).push(n); });
+  Object.keys(byCol).forEach(c=>{ byCol[c].forEach((n,i)=>{ n.position({x:c*colW, y:i*84}); }); });
+  acy.layout({name:"preset",fit:true,padding:40,animate:false}).run();
+  atkStopFlow(); atkFlow();
+  applyAtkFilter();
+  const jewels=_atk.nodes.filter(n=>n.jewel).length, ent=_atk.entries.length;
+  const top=_atk.entries[0];
+  const worst = top && top.worstSev && top.worstSev!=="info" ? ` · pire : ${SEV_LABEL[top.worstSev]} depuis « ${top.name} »` : "";
+  setStatus(`chemins d'attaque : ${ent} entrée(s) · ${jewels} actif(s) critique(s)${worst} — POSSIBLES à vérifier`);
+}
+// Filtre : entrée choisie + option « chemins vers actif critique ».
+function applyAtkFilter(){
+  if(!_atk) return; const entry=el("atk-entry").value, onlyJewel=el("atk-jewels").checked;
+  // forward-reachable depuis l'entrée choisie (ou toutes)
+  const fwd=new Set();
+  const roots = entry==="__all__" ? acy.nodes('[role="entry"]') : acy.getElementById(entry);
+  roots.forEach(r=>{ const st=[r]; while(st.length){ const x=st.pop(); if(fwd.has(x.id()))continue; fwd.add(x.id()); x.outgoers("node").forEach(y=>st.push(y)); } });
+  // nœuds qui atteignent un actif critique (reverse BFS depuis les jewels ∩ fwd)
+  let keep=fwd;
+  if(onlyJewel){ const back=new Set(); acy.nodes('[?jewel]').forEach(j=>{ const st=[j]; while(st.length){ const x=st.pop(); if(back.has(x.id()))continue; back.add(x.id()); x.incomers("node").forEach(y=>st.push(y)); } });
+    keep=new Set([...fwd].filter(id=>back.has(id))); }
+  acy.elements().addClass("atkfade");
+  acy.nodes().forEach(n=>{ if(keep.has(n.id())) n.removeClass("atkfade"); });
+  acy.edges().forEach(e=>{ if(keep.has(e.source().id())&&keep.has(e.target().id())) e.removeClass("atkfade"); });
+}
+el("atk-entry").onchange=applyAtkFilter;
+el("atk-jewels").onchange=applyAtkFilter;
+acy.on("tap","node",e=>{ const d=e.target.data(); if(d.why) setStatus(`${d.label} — ${d.why}`); });
 
 /* =================== INTERACTIONS — Sankey en couloirs « qui parle à qui » =================== */
 // Services d'infra ubiquitaires (API, DNS) et namespaces d'infra : « tout le
@@ -1185,7 +1478,9 @@ async function showInteractions(){ document.body.dataset.mode="interactions"; se
   try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderInteractions(g); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showFlow(){ document.body.dataset.mode="flow"; setTab("flow"); setLegend(KIND_LEGEND);
   el("hint").innerHTML="Exécution — colonnes par <b>rôle</b> (plusieurs types empilés, colonnes vides masquées) : <b style='color:#d0a15e'>Dépendances</b> (PVC / Secret / ConfigMap) → <b>Workload</b> → Pod → Service → Ingress, groupé par namespace. L'épaisseur = le nombre de pods. Rouge = cassé (ingress sans flux, service avec sélecteur mais 0 pod). Ambre = workload à 0 pod. <span style='color:#5b6472'>molette = zoom · espace + glisser = déplacer.</span>";
-  try { const g=await ensureGraph(); fillNsPicker(g); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderFlow(g, el("ns-picker").value); }
+  buildKindFilter(["wl","pod","svc","ing","config","storage"]);
+  try { const g=await ensureGraph(); fillNsPicker(g); fillClusterPicker(g.nodes); updateClusterCtl();
+    if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderFlow(g, el("ns-picker").value); }
   catch(e){ setStatus("API injoignable : "+e.message); el("flow").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
 async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab("overview");
   setLegend('<span class="chip" style="color:var(--muted)">Couleur = namespace · hauteur = nombre d\'objets</span>');
@@ -1193,7 +1488,11 @@ async function showOverviewTab(){ document.body.dataset.mode="overview"; setTab(
   try { const nn=await ensureNodes(); if(gitMode) buildGitIndex(nn); renderOverview(nn); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showExplore(){ document.body.dataset.mode="explore"; setTab("explore"); setLegend(LAYER_LEGEND);
   el("hint").innerHTML="Explorer — filtre puis <b>Charge</b> un départ. <b>Survole</b> un nœud : sa chaîne d'impact s'allume de bout en bout (amont + aval). <b>Clique</b> : détail, relations, points d'attention, et dépliage du cercle suivant.";
-  try { fillPicker(await ensureNodes()); ensureFindings().catch(()=>{}); cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
+  try { const nn=await ensureNodes(); fillClusterPicker(nn); updateClusterCtl(); fillPicker(nn); ensureFindings().catch(()=>{});
+    const present=[]; const seen=new Set(); for(const n of nn){ const c=catOfKind(n.kind); if(!seen.has(c)){ seen.add(c); present.push(c); } }
+    const ORDER=["wl","pod","svc","ing","config","storage","security","autoscaling","infra","autre"];
+    buildKindFilter(ORDER.filter(c=>seen.has(c)));
+    cy.resize(); } catch(e){ setStatus("API injoignable : "+e.message); } }
 async function showAccess(){ document.body.dataset.mode="access"; setTab("access"); setLegend(ACCESS_LEGEND);
   el("hint").innerHTML="Accès &amp; identité — pour chaque app : ses <b style='color:#d98a5b'>secrets</b> référencés (nom seul, jamais la valeur) → le <b>workload</b> → le <b style='color:#7c9cf5'>ServiceAccount</b> sous lequel il tourne → les <b style='color:#c678c9'>Rôles</b> qui lui sont accordés (RBAC). Répond à « qui tourne comme quoi, et qu'est-ce que ça peut faire ».";
   try { const g=await ensureGraph(); if(secMode) await ensureSec(g); if(gitMode) buildGitIndex(g); renderAccess(g); } catch(e){ setStatus("API injoignable : "+e.message); el("access").innerHTML="<p style='color:var(--security);padding:24px'>API injoignable : "+esc(e.message)+"</p>"; } }
@@ -1201,9 +1500,16 @@ async function showSecurity(){ document.body.dataset.mode="security"; setTab("se
   el("hint").innerHTML="Sécurité — <b>points d'attention</b> (informer, pas corriger) : durcissement pod, RBAC/escalation, exposition, dérive réseau. Gravité <b style='color:#e3c341'>faible</b> → <b style='color:#e0883a'>moyen</b> → <b style='color:#e8622f'>élevé</b> → <b style='color:#ef4444'>critique</b>. Active « mode sécu » (en haut) sur les autres onglets pour colorer ces risques directement sur la carte.";
   try { const g=await ensureGraph(); await ensureSec(g); renderSecurity(g); }
   catch(e){ setStatus("API injoignable : "+e.message); el("sec").innerHTML="<div id='sec-empty'>API injoignable : "+esc(e.message)+"</div>"; } }
-function setTab(m){ closeSecPanel(); for (const t of ["flow","interactions","access","security","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); }
-el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-security").onclick=showSecurity; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
+async function showAttack(){ document.body.dataset.mode="attack"; setTab("attack"); setLegend(ATK_LEGEND);
+  el("hint").innerHTML="Chemins d'attaque — <b>flux d'escalade</b> composés depuis les données existantes : <b style='color:#e8622f'>entrée exposée</b> → <b style='color:#5b9bff'>exécution</b> → <b style='color:#bc8cff'>identité (SA)</b> → <b style='color:#e0883a'>capacité (RBAC / évasion)</b> → <b style='color:#ef4444'>actif critique</b>. Choisis une entrée. <b>Chemins POSSIBLES à vérifier</b> (l'admission control PSA/OPA n'est pas connu) — posture défensive : où couper.";
+  try { const g=await ensureGraph(); await ensureFindings(); acy.resize(); renderAttack(); }
+  catch(e){ setStatus("API injoignable : "+e.message); el("atk-empty").style.display="block"; el("atk-empty").textContent="API injoignable : "+e.message; } }
+function setTab(m){ closeSecPanel(); for (const t of ["flow","interactions","access","security","attack","overview","explore"]) el("tab-"+t).classList.toggle("active", t===m); updateClusterCtl(); }
+el("tab-flow").onclick=showFlow; el("tab-interactions").onclick=showInteractions; el("tab-access").onclick=showAccess; el("tab-security").onclick=showSecurity; el("tab-attack").onclick=showAttack; el("tab-overview").onclick=showOverviewTab; el("tab-explore").onclick=showExplore;
 el("ns-picker").onchange=()=>{ if(gGraph){ if(secMode) ensureSec(gGraph).then(()=>renderFlow(gGraph, el("ns-picker").value)); else renderFlow(gGraph, el("ns-picker").value); } };
+el("cluster-picker").onchange=()=>{ activeCluster=el("cluster-picker").value; const m=document.body.dataset.mode;
+  if(m==="flow"&&gGraph) renderFlow(gGraph, el("ns-picker").value);
+  else if(m==="explore"&&gNodes){ fillPicker(gNodes); } };
 el("hide-infra").onchange=()=>{ if(gGraph) renderInteractions(gGraph); };
 function rerenderOverlay(){ const m=document.body.dataset.mode;
   if(m==="flow"&&gGraph) renderFlow(gGraph, el("ns-picker").value);
@@ -1226,7 +1532,7 @@ el("git-mode").onchange=()=>{ gitMode=el("git-mode").checked; if(gitMode){ secMo
 };
 el("refresh").onclick=async()=>{ gGraph=null; gNodes=null; gFindings=null; secIndex=null;
   const m=document.body.dataset.mode;
-  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="access") showAccess(); else if(m==="security") showSecurity(); else if(m==="overview") showOverviewTab(); else showExplore(); };
+  if(m==="flow") showFlow(); else if(m==="interactions") showInteractions(); else if(m==="access") showAccess(); else if(m==="security") showSecurity(); else if(m==="attack") showAttack(); else if(m==="overview") showOverviewTab(); else showExplore(); };
 // Légende contextuelle : Flux/Carte affichent le vrai code couleur par KIND (+ statut) ;
 // Vue d'ensemble / Explorer gardent le code par couche.
 const chip = (c,l) => `<span class="chip"><span class="dot" style="background:${c}"></span>${l}</span>`;
@@ -1242,6 +1548,10 @@ const ACCESS_LEGEND =
 const SEC_LEGEND =
   chip("#e3c341","faible") + chip("#e0883a","moyen") + chip("#e8622f","élevé") + chip("#ef4444","critique") +
   `<span class="chip" style="margin-left:10px;color:var(--muted)">gravité croissante · en mode sécu, gris = pas de point d'attention</span>`;
+const ATK_LEGEND =
+  chip("#e8622f","entrée") + chip("#5b9bff","exécution") + chip("#bc8cff","identité (SA)") +
+  chip("#e0883a","capacité") + chip("#ef4444","actif critique") +
+  `<span class="chip" style="margin-left:10px;color:var(--muted)">flux = escalade possible (à vérifier) · couleur d'arête = gravité</span>`;
 const GIT_LEGEND =
   chip("#3fb950","en phase") + chip("#e0883a","déclaré non déployé") + chip("#ef4444","hors Git (non déclaré)") +
   `<span class="chip" style="margin-left:10px;color:var(--muted)">déclaré vs observé · gris = non jugé</span>`;
