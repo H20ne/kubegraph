@@ -69,8 +69,13 @@ run_wizard() {
          terraform -chdir="$td" show -json > .kubegraph-tf.json 2>/dev/null && WIZ_TFJSON="./.kubegraph-tf.json" || echo "  terraform show a échoué (état accessible ?)"
        else echo "  terraform absent — ignoré"; fi ;;
     3) if command -v helm >/dev/null; then
-         read -r -p "Nom de release : " rel; read -r -p "Chemin du chart : " ch
-         mkdir -p gitops; helm template "$rel" "$ch" > gitops/rendered.yaml 2>/dev/null && WIZ_GITDIR="./gitops" || echo "  helm template a échoué"
+         echo "  releases déployées :"; helm list -A 2>/dev/null | awk 'NR>1{printf "    - %s (ns %s)\n",$1,$2}'
+         read -r -p "Nom de release : " rel; read -r -p "Namespace de la release : " rns
+         # helm get manifest = YAML rendu de la release DÉPLOYÉE (pas besoin du chart local).
+         mkdir -p gitops
+         if helm get manifest "$rel" -n "$rns" > gitops/rendered.yaml 2>/dev/null && [ -s gitops/rendered.yaml ]; then
+           WIZ_GITDIR="./gitops"
+         else echo "  'helm get manifest $rel -n $rns' a échoué ou vide (release/namespace ? release 'failed' ?)"; fi
        else echo "  helm absent — ignoré"; fi ;;
     4) if command -v git >/dev/null; then
          read -r -p "URL du repo GitHub : " url
