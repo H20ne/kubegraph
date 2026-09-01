@@ -67,9 +67,7 @@ func LoadTerraformJSON(path string) ([]Ident, error) {
 	var walk func(m tfModule)
 	walk = func(m tfModule) {
 		for _, r := range m.Resources {
-			if id, ok := tfResourceIdent(r); ok {
-				out = append(out, id)
-			}
+			out = append(out, tfResourceIdents(r)...)
 		}
 		for _, c := range m.ChildModules {
 			walk(c)
@@ -79,8 +77,20 @@ func LoadTerraformJSON(path string) ([]Ident, error) {
 	return out, nil
 }
 
-// tfResourceIdent mappe une ressource TF en Ident si c'est un objet K8s déclarable.
-func tfResourceIdent(r tfResource) (Ident, bool) {
+// tfResourceIdents mappe une ressource TF en 0..N Idents K8s déclarables.
+func tfResourceIdents(r tfResource) []Ident {
+	// helm_release : un chart entier (N objets). Le provider Helm expose le
+	// manifest rendu dans `manifest` SI le stockage du manifest est activé.
+	// On le déroule quand il est là ; sinon on ne peut pas énumérer → ignoré.
+	if r.Type == "helm_release" {
+		var v struct {
+			Manifest string `json:"manifest"`
+		}
+		if json.Unmarshal(r.Values, &v) == nil && strings.TrimSpace(v.Manifest) != "" {
+			return identsFromRendered([]byte(v.Manifest))
+		}
+		return nil
+	}
 	// kubernetes_manifest : objet générique, kind/metadata dans values.manifest.
 	if r.Type == "kubernetes_manifest" {
 		var v struct {
@@ -93,19 +103,19 @@ func tfResourceIdent(r tfResource) (Ident, bool) {
 			} `json:"manifest"`
 		}
 		if err := json.Unmarshal(r.Values, &v); err != nil {
-			return Ident{}, false
+			return nil
 		}
 		k := v.Manifest.Kind
 		if !declarable[k] || v.Manifest.Metadata.Name == "" {
-			return Ident{}, false
+			return nil
 		}
-		return Ident{Kind: k, Namespace: v.Manifest.Metadata.Namespace, Name: v.Manifest.Metadata.Name}, true
+		return []Ident{{Kind: k, Namespace: v.Manifest.Metadata.Namespace, Name: v.Manifest.Metadata.Name}}
 	}
 	// Ressources kubernetes_* typées : normalise le suffixe de version puis mappe.
 	t := strings.TrimSuffix(strings.TrimSuffix(r.Type, "_v1"), "_v2")
 	kind, ok := tfType2Kind[t]
 	if !ok {
-		return Ident{}, false
+		return nil
 	}
 	// Le provider kubernetes expose metadata comme un bloc-liste : metadata[0].
 	var v struct {
@@ -115,7 +125,7 @@ func tfResourceIdent(r tfResource) (Ident, bool) {
 		} `json:"metadata"`
 	}
 	if err := json.Unmarshal(r.Values, &v); err != nil || len(v.Metadata) == 0 || v.Metadata[0].Name == "" {
-		return Ident{}, false
+		return nil
 	}
-	return Ident{Kind: kind, Namespace: v.Metadata[0].Namespace, Name: v.Metadata[0].Name}, true
+	return []Ident{{Kind: kind, Namespace: v.Metadata[0].Namespace, Name: v.Metadata[0].Name}}
 }

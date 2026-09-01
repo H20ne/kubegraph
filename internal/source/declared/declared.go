@@ -34,11 +34,14 @@ type Ident struct{ Kind, Namespace, Name string }
 // declarable : kinds qu'un dépôt GitOps est censé déclarer. On exclut ce que le
 // cluster GÉNÈRE (Pod, ReplicaSet, EndpointSlice…) et nos nœuds synthétiques
 // (Secret déduit des specs — jamais un objet réel ici).
+// On ne déclare QUE les kinds que la source observée émet aussi comme nœuds :
+// sinon (ConfigMap, RoleBinding, ClusterRoleBinding — repliés dans GRANTS ou non
+// dessinés) chaque objet déclaré ressort en « manquant » à tort (faux fantômes).
 var declarable = map[string]bool{
 	"Deployment": true, "StatefulSet": true, "DaemonSet": true,
 	"Job": true, "CronJob": true, "Service": true, "Ingress": true,
-	"ConfigMap": true, "NetworkPolicy": true, "ServiceAccount": true,
-	"Role": true, "ClusterRole": true, "RoleBinding": true, "ClusterRoleBinding": true,
+	"NetworkPolicy": true, "ServiceAccount": true,
+	"Role": true, "ClusterRole": true,
 	"HorizontalPodAutoscaler": true, "PodDisruptionBudget": true, "PersistentVolumeClaim": true,
 }
 
@@ -65,14 +68,12 @@ func layerOf(kind string) graph.Layer {
 	}
 }
 
-// Load lit récursivement un dossier de YAML/JSON rendus et retourne les identités
-// déclarées (kinds déclarables uniquement).
-func Load(dir string) ([]Ident, error) {
+// identsFromRendered parcourt un blob YAML/JSON multi-documents (séparés par ---)
+// et retourne les identités déclarables. Déroule les « List » (kubectl -o yaml).
+// Partagé par Load (dossier) et par le manifest d'un helm_release Terraform.
+func identsFromRendered(blob []byte) []Ident {
 	dec := scheme.Codecs.UniversalDeserializer()
 	var out []Ident
-	// add décode UN document. Un « List » (ce que produit `kubectl get -o yaml`)
-	// est déroulé : chaque item est re-décodé. Le reste est ignoré silencieusement
-	// (CRD, type inconnu, non-K8s).
 	var add func(doc []byte)
 	add = func(doc []byte) {
 		if len(bytes.TrimSpace(doc)) == 0 {
@@ -95,12 +96,20 @@ func Load(dir string) ([]Ident, error) {
 		if !declarable[gvk.Kind] {
 			return
 		}
-		m, e := meta.Accessor(obj)
-		if e != nil {
-			return
+		if m, e := meta.Accessor(obj); e == nil {
+			out = append(out, Ident{Kind: gvk.Kind, Namespace: m.GetNamespace(), Name: m.GetName()})
 		}
-		out = append(out, Ident{Kind: gvk.Kind, Namespace: m.GetNamespace(), Name: m.GetName()})
 	}
+	for _, doc := range bytes.Split(blob, []byte("\n---")) {
+		add(doc)
+	}
+	return out
+}
+
+// Load lit récursivement un dossier de YAML/JSON rendus et retourne les identités
+// déclarées (kinds déclarables uniquement).
+func Load(dir string) ([]Ident, error) {
+	var out []Ident
 	err := filepath.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() {
 			return nil
@@ -114,9 +123,7 @@ func Load(dir string) ([]Ident, error) {
 		if e != nil {
 			return nil // fichier illisible : non bloquant
 		}
-		for _, doc := range bytes.Split(b, []byte("\n---")) {
-			add(doc)
-		}
+		out = append(out, identsFromRendered(b)...)
 		return nil
 	})
 	return out, err
